@@ -27,13 +27,14 @@ export default function LoginPage() {
   const [username, setUsername] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
 
   // Track UI states.
   const [loading, setLoading] = useState(false)
   const [bannerError, setBannerError] = useState('')
 
   // Track field-level errors for registration.
-  const [fieldErrors, setFieldErrors] = useState({ username: '', email: '', password: '' })
+  const [fieldErrors, setFieldErrors] = useState({ username: '', email: '', password: '', confirmPassword: '' })
 
   const navigate = useNavigate()
 
@@ -43,34 +44,51 @@ export default function LoginPage() {
   const resetErrors = () => {
     // Clear errors whenever the user switches modes or retries.
     setBannerError('')
-    setFieldErrors({ username: '', email: '', password: '' })
+    setFieldErrors({ username: '', email: '', password: '', confirmPassword: '' })
   }
 
   const validateRegister = () => {
-    // Build a new error object for each field.
-    const errors = { username: '', email: '', password: '' }
+    // Build a new error object for each field (used on submit).
+    const errors = { username: '', email: '', password: '', confirmPassword: '' }
 
-    // Username must exist.
-    if (!username.trim()) {
-      errors.username = 'Username is required'
+    if (!/^[a-zA-Z0-9_]{3,20}$/.test(username.trim())) {
+      errors.username = 'Username must be 3-20 characters, letters/numbers/_ only'
     }
 
-    // Email must match the required regex.
     if (!emailPattern.test(email.trim())) {
-      errors.email = 'Email must look like example@domain.com'
+      errors.email = 'Please enter a valid email address'
     }
 
-    // Password must be at least 8 characters.
     if (password.length < 8) {
       errors.password = 'Password must be at least 8 characters'
     }
 
-    // Store errors so we can display them in the UI.
+    if (confirmPassword !== password) {
+      errors.confirmPassword = 'Passwords do not match'
+    }
+
     setFieldErrors(errors)
 
-    // Validation passes only if every error is empty.
-    return !errors.username && !errors.email && !errors.password
+    return !errors.username && !errors.email && !errors.password && !errors.confirmPassword
   }
+
+  // Live rules for disabling the Create Account button
+  const registerLooksGood = useMemo(() => {
+    const uOk = /^[a-zA-Z0-9_]{3,20}$/.test(username.trim())
+    const eOk = emailPattern.test(email.trim())
+    const pOk = password.length >= 8
+    const cOk = confirmPassword === password && confirmPassword.length > 0
+    return uOk && eOk && pOk && cOk
+  }, [username, email, password, confirmPassword, emailPattern])
+
+  // Tiny password strength hint for the register form only
+  const pwdStrength = useMemo(() => {
+    if (password.length < 8) return { label: 'Too short', color: '#EF4444', width: '33%' }
+    const hasNum = /\d/.test(password)
+    const hasSpec = /[^A-Za-z0-9]/.test(password)
+    if (hasNum && hasSpec) return { label: 'Strong', color: '#10B981', width: '100%' }
+    return { label: 'Okay', color: '#EAB308', width: '66%' }
+  }, [password])
 
   const handleLogin = async (e) => {
     // Prevent the browser from reloading the page.
@@ -176,6 +194,7 @@ export default function LoginPage() {
             onClick={() => {
               setTab('login')
               resetErrors()
+              setConfirmPassword('')
             }}
             style={{
               background: 'transparent',
@@ -217,6 +236,28 @@ export default function LoginPage() {
 
         {tab === 'login' ? <div style={{ marginTop: 6, fontSize: 14, color: COLORS.muted }}>Sign in to access your documents</div> : null}
 
+        {/* Up-front checklist so people don’t guess the rules */}
+        {tab === 'register' ? (
+          <div
+            style={{
+              marginTop: 12,
+              background: '#E6F1FB',
+              border: '1px solid #85B7EB',
+              borderRadius: 8,
+              padding: 12,
+              fontSize: 13,
+              color: '#185FA5'
+            }}
+          >
+            <strong>Account requirements:</strong>
+            <ul style={{ margin: '6px 0 0 0', paddingLeft: 18 }}>
+              <li>Username: 3-20 characters, letters / numbers / underscore, no spaces</li>
+              <li>Email: must be a valid email (example@domain.com)</li>
+              <li>Password: minimum 8 characters</li>
+            </ul>
+          </div>
+        ) : null}
+
         {/* Banner error */}
         {bannerError ? (
           <div
@@ -237,12 +278,21 @@ export default function LoginPage() {
         {/* Form */}
         <form onSubmit={tab === 'login' ? handleLogin : handleRegister}>
           <label style={labelStyle}>Username</label>
-          <input
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            placeholder="Enter your username"
-            style={inputStyle}
-          />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="Enter your username"
+              style={{ ...inputStyle, flex: 1 }}
+            />
+            {tab === 'register' && username.trim() ? (
+              /^[a-zA-Z0-9_]{3,20}$/.test(username.trim()) ? (
+                <span style={{ color: '#10B981', fontWeight: 900 }}>✓</span>
+              ) : (
+                <span style={{ color: COLORS.danger, fontWeight: 900 }}>✗</span>
+              )
+            ) : null}
+          </div>
           {tab === 'register' && fieldErrors.username ? (
             <div style={{ marginTop: 6, color: COLORS.danger, fontSize: 12 }}>{fieldErrors.username}</div>
           ) : null}
@@ -250,19 +300,82 @@ export default function LoginPage() {
           {tab === 'register' ? (
             <>
               <label style={labelStyle}>Email</label>
-              <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" style={inputStyle} />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  style={{ ...inputStyle, flex: 1 }}
+                />
+                {email ? (
+                  emailPattern.test(email.trim()) ? (
+                    <span style={{ color: '#10B981', fontWeight: 900 }}>✓</span>
+                  ) : (
+                    <span style={{ color: COLORS.danger, fontWeight: 900 }}>✗</span>
+                  )
+                ) : null}
+              </div>
               {fieldErrors.email ? <div style={{ marginTop: 6, color: COLORS.danger, fontSize: 12 }}>{fieldErrors.email}</div> : null}
             </>
           ) : null}
 
           <label style={labelStyle}>Password</label>
-          <input value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" type="password" style={inputStyle} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••"
+              type="password"
+              style={{ ...inputStyle, flex: 1 }}
+            />
+            {tab === 'register' && password ? (
+              password.length >= 8 ? (
+                <span style={{ color: '#10B981', fontWeight: 900 }}>✓</span>
+              ) : (
+                <span style={{ color: COLORS.danger, fontWeight: 900 }}>✗</span>
+              )
+            ) : null}
+          </div>
           {tab === 'register' && fieldErrors.password ? (
             <div style={{ marginTop: 6, color: COLORS.danger, fontSize: 12 }}>{fieldErrors.password}</div>
           ) : null}
 
+          {tab === 'register' ? (
+            <div style={{ marginTop: 8 }}>
+              <div style={{ height: 6, borderRadius: 999, background: '#E5E7EB', overflow: 'hidden' }}>
+                <div style={{ height: '100%', width: pwdStrength.width, background: pwdStrength.color, transition: 'width 0.2s' }} />
+              </div>
+              <div style={{ marginTop: 4, fontSize: 12, color: pwdStrength.color, fontWeight: 700 }}>{pwdStrength.label}</div>
+            </div>
+          ) : null}
+
+          {tab === 'register' ? (
+            <>
+              <label style={labelStyle}>Confirm password</label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="Repeat password"
+                  type="password"
+                  style={{ ...inputStyle, flex: 1 }}
+                />
+                {confirmPassword ? (
+                  confirmPassword === password ? (
+                    <span style={{ color: '#10B981', fontWeight: 900 }}>✓</span>
+                  ) : (
+                    <span style={{ color: COLORS.danger, fontWeight: 900 }}>✗</span>
+                  )
+                ) : null}
+              </div>
+              {fieldErrors.confirmPassword ? (
+                <div style={{ marginTop: 6, color: COLORS.danger, fontSize: 12 }}>{fieldErrors.confirmPassword}</div>
+              ) : null}
+            </>
+          ) : null}
+
           <button
-            disabled={loading}
+            disabled={loading || (tab === 'register' && !registerLooksGood)}
             style={{
               marginTop: 18,
               width: '100%',

@@ -6,9 +6,9 @@
 // ============================================
 
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import Navbar from '../components/Navbar.jsx'
-import { getDocument, getNotifications, saveDocument } from '../api.js'
+import { getDocument, getNotifications, removeUserFromDocument, saveDocument, updateUserRole } from '../api.js'
 
 const COLORS = {
   primary: '#4F46E5',
@@ -26,6 +26,9 @@ export default function EditorPage() {
   // Router helper for navigation.
   const navigate = useNavigate()
 
+  // Optional message after returning from version restore
+  const location = useLocation()
+
   // Store the loaded document.
   const [document, setDocument] = useState(null)
 
@@ -39,6 +42,15 @@ export default function EditorPage() {
   // Notification count for the navbar badge.
   const [unreadCount, setUnreadCount] = useState(0)
 
+  // Copy of collaborators we can update when roles change (owner UI)
+  const [collaborators, setCollaborators] = useState([])
+
+  // Brief “Saved” label next to a role dropdown after a successful PATCH
+  const [roleSavedUserId, setRoleSavedUserId] = useState(null)
+
+  // One-time banner when user lands here after restoring a revision
+  const [restoreBanner, setRestoreBanner] = useState('')
+
   const loadDoc = async () => {
     // Fetch the latest version of the document.
     const doc = await getDocument(id)
@@ -48,6 +60,15 @@ export default function EditorPage() {
 
     // Put the content into the editor textarea.
     setContent(doc.content || '')
+
+    // Normalize ACL rows: DB/README use user_id; older responses may only have id
+    const raw = doc.collaborators || []
+    setCollaborators(
+      raw.map((c) => ({
+        ...c,
+        user_id: c.user_id != null ? c.user_id : c.id
+      }))
+    )
   }
 
   const loadUnread = async () => {
@@ -61,6 +82,15 @@ export default function EditorPage() {
     loadDoc().catch((e) => console.error(e))
     loadUnread().catch((e) => console.error(e))
   }, [id])
+
+  useEffect(() => {
+    // Version history sends a flash message through router state
+    const msg = location.state && location.state.restoreMessage
+    if (msg) {
+      setRestoreBanner(String(msg))
+      navigate(location.pathname, { replace: true, state: {} })
+    }
+  }, [location.state, location.pathname, navigate])
 
   // This determines whether the user can edit.
   const isViewer = useMemo(() => String(document?.your_role || '').toLowerCase() === 'viewer', [document])
@@ -79,9 +109,61 @@ export default function EditorPage() {
   }
 
   const handleRefresh = async () => {
-    // Refresh is how two users can see each other’s edits.
-    // One user saves; the other clicks Refresh to pull the latest content.
-    await loadDoc()
+    // Pull latest text from server first
+    const doc = await getDocument(id)
+    setDocument(doc)
+    setContent(doc.content || '')
+    const raw = doc.collaborators || []
+    setCollaborators(
+      raw.map((c) => ({
+        ...c,
+        user_id: c.user_id != null ? c.user_id : c.id
+      }))
+    )
+
+    // Same as Save: persist a revision snapshot when editors/owners refresh
+    const canEdit = String(doc.your_role || '').toLowerCase() !== 'viewer'
+    if (canEdit) {
+      const result = await saveDocument(id, doc.content || '')
+      const time = new Date(result.updatedAt).toLocaleTimeString()
+      setLastSavedText(`Last saved: ${time}`)
+      setSavedFlash(true)
+      setTimeout(() => setSavedFlash(false), 2000)
+    }
+  }
+
+  // Logged-in profile (used to see if we’re the owner for ACL controls)
+  const currentUser = useMemo(() => {
+    try {
+      return JSON.parse(localStorage.getItem('cn_user') || 'null')
+    } catch {
+      return null
+    }
+  }, [])
+
+  const isDocumentOwner = currentUser && document && Number(currentUser.id) === Number(document.owner_id)
+
+  const changeUserRole = async (userId, newRole) => {
+    // Only the document owner can change roles — server enforces too
+    try {
+      await updateUserRole(id, userId, newRole)
+      setCollaborators((prev) => prev.map((c) => (Number(c.user_id) === Number(userId) ? { ...c, role: newRole } : c)))
+      setRoleSavedUserId(userId)
+      setTimeout(() => setRoleSavedUserId(null), 1000)
+    } catch (err) {
+      alert('Could not update role: ' + (err?.response?.data?.error || err.message))
+    }
+  }
+
+  const removeUser = async (userId, username) => {
+    // Confirm before removing someone’s access entirely
+    if (!window.confirm(`Remove ${username}'s access to this document?`)) return
+    try {
+      await removeUserFromDocument(id, userId)
+      setCollaborators((prev) => prev.filter((c) => Number(c.user_id) !== Number(userId)))
+    } catch (err) {
+      alert('Could not remove user: ' + (err?.response?.data?.error || err.message))
+    }
   }
 
   // If the document hasn’t loaded yet, show a simple loading state.
@@ -159,15 +241,54 @@ export default function EditorPage() {
         {/* “Saved!” flash */}
         {savedFlash ? <div style={{ marginTop: 10, color: '#10B981', fontWeight: 900 }}>Saved!</div> : null}
 
-        {/* Access list (collaborators) */}
+        {/* After restore, show a short confirmation at the top of the editor */}
+        {restoreBanner ? (
+          <div style={{ marginTop: 10, color: '#10B981', fontWeight: 800, fontSize: 14 }}>{restoreBanner}</div>
+        ) : null}
+
+        {/* Access list — owners get role dropdown + remove; everyone else sees the simple list */}
         <div style={{ marginTop: 12, background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 12, padding: 14 }}>
-          <div style={{ fontWeight: 900, marginBottom: 8 }}>Collaborators (access list)</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, color: COLORS.muted, fontSize: 13 }}>
-            {(document.collaborators || []).map((c) => (
-              <div key={c.id} style={{ padding: '6px 10px', border: `1px solid ${COLORS.border}`, borderRadius: 999 }}>
-                {c.username} · {c.role}
-              </div>
-            ))}
+          <div style={{ fontWeight: 900, marginBottom: 8 }}>Active collaborators</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, color: COLORS.muted, fontSize: 13 }}>
+            {collaborators.map((c) => {
+              const isMe = currentUser && Number(c.user_id) === Number(currentUser.id)
+              const isOwnerRow = String(c.role || '').toLowerCase() === 'owner'
+              const showManage = isDocumentOwner && !isMe && !isOwnerRow
+
+              return (
+                <div
+                  key={c.user_id}
+                  style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10, padding: '6px 10px', border: `1px solid ${COLORS.border}`, borderRadius: 10 }}
+                >
+                  <span style={{ fontWeight: 800, color: COLORS.text }}>
+                    {c.username} · {c.role}
+                  </span>
+
+                  {showManage ? (
+                    <>
+                      <select
+                        value={String(c.role || '').toLowerCase() === 'editor' ? 'editor' : 'viewer'}
+                        onChange={(e) => changeUserRole(c.user_id, e.target.value)}
+                        style={{ height: 30, borderRadius: 8, border: `1px solid ${COLORS.border}`, padding: '0 8px', fontSize: 13 }}
+                      >
+                        <option value="editor">Editor</option>
+                        <option value="viewer">Viewer</option>
+                      </select>
+                      {roleSavedUserId != null && Number(roleSavedUserId) === Number(c.user_id) ? (
+                        <span style={{ fontSize: 12, color: '#10B981', fontWeight: 800 }}>Saved</span>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={() => removeUser(c.user_id, c.username)}
+                        style={{ background: 'none', border: 'none', color: '#EF4444', cursor: 'pointer', fontSize: 12, fontWeight: 800, padding: 0 }}
+                      >
+                        Remove user
+                      </button>
+                    </>
+                  ) : null}
+                </div>
+              )
+            })}
           </div>
         </div>
 

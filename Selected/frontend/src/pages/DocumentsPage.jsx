@@ -22,6 +22,8 @@ const COLORS = {
 export default function DocumentsPage() {
   const [documents, setDocuments] = useState([])
   const [notifications, setNotifications] = useState([])
+  // Search box text — filters the list we already loaded (no extra API)
+  const [search, setSearch] = useState('')
   const navigate = useNavigate()
 
   const load = async () => {
@@ -37,6 +39,13 @@ export default function DocumentsPage() {
   }, [])
 
   const unreadCount = useMemo(() => notifications.filter((n) => !n.is_read).length, [notifications])
+
+  // Filter by title as the user types (client-side only)
+  const filtered = documents.filter((doc) =>
+    String(doc.title || '')
+      .toLowerCase()
+      .includes(search.toLowerCase())
+  )
 
   const formatRole = (role) => {
     // Display nice casing while keeping backend enums lowercase.
@@ -62,6 +71,32 @@ export default function DocumentsPage() {
         </div>
 
         <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 12, overflow: 'hidden' }}>
+          {/* Search documents — same border/focus colors as the rest of the app */}
+          <div style={{ padding: 12, borderBottom: `1px solid ${COLORS.border}` }}>
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search documents..."
+              style={{
+                width: '100%',
+                maxWidth: 420,
+                height: 40,
+                borderRadius: 8,
+                border: `1px solid ${COLORS.border}`,
+                background: COLORS.background,
+                padding: '0 12px',
+                fontSize: 14,
+                outline: 'none'
+              }}
+              onFocus={(e) => {
+                e.target.style.borderColor = COLORS.primary
+              }}
+              onBlur={(e) => {
+                e.target.style.borderColor = COLORS.border
+              }}
+            />
+          </div>
+
           <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr 0.7fr 1fr 120px', gap: 0, padding: 12, borderBottom: `1px solid ${COLORS.border}`, fontWeight: 900, color: COLORS.muted, fontSize: 12 }}>
             <div>Title</div>
             <div>Owner</div>
@@ -70,7 +105,7 @@ export default function DocumentsPage() {
             <div></div>
           </div>
 
-          {documents.map((doc) => (
+          {filtered.map((doc) => (
             <div key={doc.id} style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr 0.7fr 1fr 120px', padding: 12, borderBottom: `1px solid ${COLORS.border}`, alignItems: 'center', background: 'white' }}>
               <button
                 onClick={() => navigate(`/documents/${doc.id}`)}
@@ -90,7 +125,11 @@ export default function DocumentsPage() {
             </div>
           ))}
 
-          {documents.length === 0 ? <div style={{ padding: 16, color: COLORS.muted }}>No documents yet.</div> : null}
+          {documents.length === 0 ? (
+            <div style={{ padding: 16, color: COLORS.muted }}>No documents yet.</div>
+          ) : filtered.length === 0 ? (
+            <div style={{ padding: 16, color: COLORS.muted }}>No documents match your search</div>
+          ) : null}
         </div>
       </div>
     </div>

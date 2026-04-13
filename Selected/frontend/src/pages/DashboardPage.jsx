@@ -51,6 +51,8 @@ export default function DashboardPage() {
   const [shareResults, setShareResults] = useState([])
   const [shareRole, setShareRole] = useState('viewer')
   const [shareError, setShareError] = useState('')
+  // Picked from search — API runs only after Confirm share
+  const [shareSelectedUser, setShareSelectedUser] = useState(null)
 
   const navigate = useNavigate()
 
@@ -99,7 +101,9 @@ export default function DashboardPage() {
       // Refresh list.
       await loadPageData()
     } catch (err) {
-      setCreateError(err?.response?.data?.error || 'Could not create document')
+      const d = err?.response?.data
+      const msg = [d?.error, d?.detail].filter(Boolean).join(' — ')
+      setCreateError(msg || 'Could not create document')
     }
   }
 
@@ -126,11 +130,13 @@ export default function DashboardPage() {
     setShareResults([])
     setShareRole('viewer')
     setShareError('')
+    setShareSelectedUser(null)
   }
 
   const handleSearchUsers = async (query) => {
     // Keep query in sync with the input.
     setShareQuery(query)
+    setShareSelectedUser(null)
 
     // Empty query means no dropdown.
     if (!query.trim()) {
@@ -158,6 +164,7 @@ export default function DashboardPage() {
 
       // Close the share UI.
       setShareOpenForDocId(null)
+      setShareSelectedUser(null)
 
       // Refresh list and mini notifications.
       await loadPageData()
@@ -322,32 +329,72 @@ export default function DashboardPage() {
 
                             {shareResults.length > 0 ? (
                               <div style={{ marginTop: 6, border: `1px solid ${COLORS.border}`, borderRadius: 8, overflow: 'hidden' }}>
-                                {shareResults.map((u) => (
-                                  <button
-                                    key={u.id}
-                                    onClick={() => handleShareDocument(doc.id, u.username)}
-                                    style={{ width: '100%', textAlign: 'left', padding: '8px 10px', border: 'none', background: 'white', cursor: 'pointer', borderBottom: `1px solid ${COLORS.border}` }}
-                                  >
-                                    {u.username}
-                                  </button>
-                                ))}
+                                {shareResults.map((u) => {
+                                  const picked = shareSelectedUser && Number(shareSelectedUser.id) === Number(u.id)
+                                  return (
+                                    <button
+                                      key={u.id}
+                                      type="button"
+                                      onClick={() => setShareSelectedUser({ id: u.id, username: u.username })}
+                                      style={{
+                                        width: '100%',
+                                        textAlign: 'left',
+                                        padding: '8px 10px',
+                                        border: 'none',
+                                        background: picked ? '#EEF2FF' : 'white',
+                                        cursor: 'pointer',
+                                        borderBottom: `1px solid ${COLORS.border}`,
+                                        fontWeight: picked ? 900 : 400
+                                      }}
+                                    >
+                                      {u.username}
+                                    </button>
+                                  )
+                                })}
                               </div>
                             ) : null}
 
-                            <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
+                            {shareSelectedUser ? (
+                              <div style={{ marginTop: 8, fontSize: 13, color: COLORS.text }}>
+                                Selected: <strong>{shareSelectedUser.username}</strong> — pick a role, then confirm.
+                              </div>
+                            ) : null}
+
+                            <div style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                               <select
                                 value={shareRole}
                                 onChange={(e) => setShareRole(e.target.value)}
-                                style={{ height: 34, borderRadius: 8, border: `1px solid ${COLORS.border}`, padding: '0 10px', flex: 1 }}
+                                style={{ height: 34, borderRadius: 8, border: `1px solid ${COLORS.border}`, padding: '0 10px', flex: 1, minWidth: 120 }}
                               >
                                 <option value="editor">Editor</option>
                                 <option value="viewer">Viewer</option>
                               </select>
 
                               <button
+                                type="button"
+                                disabled={!shareSelectedUser}
+                                onClick={() => shareSelectedUser && handleShareDocument(doc.id, shareSelectedUser.username)}
+                                style={{
+                                  height: 34,
+                                  borderRadius: 8,
+                                  border: 'none',
+                                  background: shareSelectedUser ? COLORS.primary : COLORS.border,
+                                  color: 'white',
+                                  cursor: shareSelectedUser ? 'pointer' : 'not-allowed',
+                                  fontWeight: 900,
+                                  padding: '0 12px',
+                                  opacity: shareSelectedUser ? 1 : 0.7
+                                }}
+                              >
+                                Confirm share
+                              </button>
+
+                              <button
+                                type="button"
                                 onClick={() => {
                                   setShareOpenForDocId(null)
                                   setShareError('')
+                                  setShareSelectedUser(null)
                                 }}
                                 style={{ height: 34, borderRadius: 8, border: `1px solid ${COLORS.border}`, background: 'transparent', cursor: 'pointer', fontWeight: 800 }}
                               >

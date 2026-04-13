@@ -35,6 +35,15 @@ export default function VersionHistoryPage() {
   // Store unread count for navbar badge.
   const [unreadCount, setUnreadCount] = useState(0)
 
+  // Click a row to pin the text preview open/closed
+  const [previewId, setPreviewId] = useState(null)
+
+  // Hovering a row also reveals the same preview (no click needed)
+  const [hoverPreviewId, setHoverPreviewId] = useState(null)
+
+  // Disable only the Restore button that’s in flight
+  const [restoringId, setRestoringId] = useState(null)
+
   const load = async () => {
     // Load document, revisions, and notifications in parallel.
     const [doc, revs, notifs] = await Promise.all([getDocument(id), getRevisions(id), getNotifications()])
@@ -54,16 +63,24 @@ export default function VersionHistoryPage() {
     load().catch((e) => console.error(e))
   }, [id])
 
-  const handleRestore = async (revision) => {
-    // Confirm before restoring, as requested.
-    const ok = window.confirm(`Restore to v${revision.version_number}? This will create a new version.`)
+  const handleRestore = async (revision, e) => {
+    if (e) e.stopPropagation()
+    const ok = window.confirm(
+      `Restore to version ${revision.version_number}? This will create a new version with the old content. Your current version will not be lost.`
+    )
     if (!ok) return
 
-    // Ask the API layer to restore.
-    await restoreRevision(id, revision.id)
-
-    // Navigate back to the editor after restoring.
-    navigate(`/documents/${id}`)
+    setRestoringId(revision.id)
+    try {
+      await restoreRevision(id, revision.id)
+      navigate(`/documents/${id}`, {
+        state: { restoreMessage: `Restored from version ${revision.version_number}. Open Save if you want to tweak further.` }
+      })
+    } catch (err) {
+      alert(err?.response?.data?.error || err.message || 'Restore failed')
+    } finally {
+      setRestoringId(null)
+    }
   }
 
   return (
@@ -85,26 +102,44 @@ export default function VersionHistoryPage() {
         {/* Revisions list */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {revisions.map((rev, index) => {
-            // Treat the newest revision as “current”.
+            // Newest revision matches live editor content — that’s the “current” one
             const isCurrent = index === 0
+            const snippet = String(rev.content || '').slice(0, 200)
 
             return (
-              <div key={rev.id} style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 12, padding: 14 }}>
+              <div
+                key={rev.id}
+                role="presentation"
+                onMouseEnter={() => setHoverPreviewId(rev.id)}
+                onMouseLeave={() => setHoverPreviewId(null)}
+                onClick={() => setPreviewId((prev) => (prev === rev.id ? null : rev.id))}
+                onKeyDown={() => {}}
+                style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 12, padding: 14, cursor: 'pointer' }}
+              >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div style={{ fontWeight: 900, color: COLORS.text }}>
-                    v{rev.version_number} {isCurrent ? '(Current)' : ''}
+                    v{rev.version_number}
+                    {isCurrent ? <span style={{ marginLeft: 8, fontSize: 13, color: '#10B981' }}>Current Version</span> : null}
                   </div>
 
                   {!isCurrent ? (
                     <button
-                      onClick={() => handleRestore(rev)}
-                      style={{ height: 32, borderRadius: 8, border: `1px solid ${COLORS.border}`, background: 'transparent', cursor: 'pointer', fontWeight: 900 }}
+                      type="button"
+                      disabled={restoringId != null}
+                      onClick={(e) => handleRestore(rev, e)}
+                      style={{
+                        height: 32,
+                        borderRadius: 8,
+                        border: `1px solid ${COLORS.border}`,
+                        background: 'transparent',
+                        cursor: restoringId != null ? 'wait' : 'pointer',
+                        fontWeight: 900,
+                        opacity: restoringId === rev.id ? 0.6 : 1
+                      }}
                     >
-                      Restore
+                      {restoringId === rev.id ? 'Restoring…' : 'Restore'}
                     </button>
-                  ) : (
-                    <div style={{ fontSize: 12, fontWeight: 900, color: '#10B981' }}>Current</div>
-                  )}
+                  ) : null}
                 </div>
 
                 <div style={{ marginTop: 6, color: COLORS.muted, fontSize: 13 }}>
@@ -112,6 +147,24 @@ export default function VersionHistoryPage() {
                 </div>
 
                 <div style={{ marginTop: 8, color: COLORS.text, fontSize: 14 }}>{rev.change_description || 'Saved'}</div>
+
+                {/* First chunk of that revision’s text — click the card above to show/hide */}
+                {previewId === rev.id || hoverPreviewId === rev.id ? (
+                  <div
+                    style={{
+                      marginTop: 10,
+                      padding: 10,
+                      borderRadius: 8,
+                      background: '#F3F4F6',
+                      color: COLORS.muted,
+                      fontSize: 13,
+                      whiteSpace: 'pre-wrap'
+                    }}
+                  >
+                    {snippet || '(empty)'}
+                    {String(rev.content || '').length > 200 ? '…' : ''}
+                  </div>
+                ) : null}
               </div>
             )
           })}

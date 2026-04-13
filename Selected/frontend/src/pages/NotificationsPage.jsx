@@ -7,7 +7,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import Navbar from '../components/Navbar.jsx'
-import { getNotifications, markAllRead } from '../api.js'
+import { getNotifications, markAllRead, markOneRead } from '../api.js'
 
 const COLORS = {
   primary: '#4F46E5',
@@ -32,7 +32,7 @@ export default function NotificationsPage() {
   const [notifications, setNotifications] = useState([])
 
   // Store which filter tab is selected.
-  const [filter, setFilter] = useState('all') // all | shares | edits | restores
+  const [filter, setFilter] = useState('all') // all | shares | edits | restores | deletes
 
   const load = async () => {
     // Load notifications from the API layer.
@@ -55,6 +55,7 @@ export default function NotificationsPage() {
     if (filter === 'shares') return notifications.filter((n) => n.type === 'document_shared')
     if (filter === 'edits') return notifications.filter((n) => n.type === 'document_edited')
     if (filter === 'restores') return notifications.filter((n) => n.type === 'version_restored')
+    if (filter === 'deletes') return notifications.filter((n) => n.type === 'document_deleted')
     return notifications
   }, [notifications, filter])
 
@@ -64,6 +65,16 @@ export default function NotificationsPage() {
 
     // Reload so the UI updates.
     await load()
+  }
+
+  const markOneReadLocal = async (notifId) => {
+    // Flip the blue dot immediately, then sync with the server
+    setNotifications((prev) => prev.map((n) => (n.id === notifId ? { ...n, is_read: true } : n)))
+    try {
+      await markOneRead(notifId)
+    } catch (e) {
+      console.error(e)
+    }
   }
 
   return (
@@ -94,7 +105,8 @@ export default function NotificationsPage() {
             { key: 'all', label: 'All' },
             { key: 'shares', label: 'Shares' },
             { key: 'edits', label: 'Edits' },
-            { key: 'restores', label: 'Restores' }
+            { key: 'restores', label: 'Restores' },
+            { key: 'deletes', label: 'Deletes' }
           ].map((t) => (
             <button
               key={t.key}
@@ -119,13 +131,23 @@ export default function NotificationsPage() {
           {filtered.map((n) => (
             <div
               key={n.id}
+              role="button"
+              tabIndex={0}
+              onClick={() => markOneReadLocal(n.id)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  markOneReadLocal(n.id)
+                }
+              }}
               style={{
                 display: 'flex',
                 justifyContent: 'space-between',
                 gap: 12,
                 padding: 12,
                 borderBottom: `1px solid ${COLORS.border}`,
-                background: 'white'
+                background: 'white',
+                cursor: 'pointer'
               }}
             >
               <div>

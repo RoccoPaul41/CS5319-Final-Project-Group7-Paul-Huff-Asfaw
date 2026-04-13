@@ -9,10 +9,10 @@
 
 import axios from 'axios'
 
-// Create a single axios client with a single base URL.
-// We use a direct URL to match the project specification.
+// Relative "/api" hits the Vite dev/preview proxy (see vite.config.js) so you always reach the Node API.
+// Static deploy on another host: set VITE_API_BASE at build time (e.g. https://api.example.com/api).
 const client = axios.create({
-  baseURL: 'http://localhost:3002/api'
+  baseURL: import.meta.env.VITE_API_BASE || '/api'
 })
 
 // Attach the JWT token to every request automatically.
@@ -27,6 +27,22 @@ client.interceptors.request.use((config) => {
 
   return config
 })
+
+// If the server rejects the JWT (new JWT_SECRET, expiry, etc.), drop stale auth instead of a broken dashboard
+client.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    const msg = error.response?.data?.error
+    if (error.response?.status === 403 && msg === 'Invalid or expired token') {
+      localStorage.removeItem('cn_token')
+      localStorage.removeItem('cn_user')
+      if (!window.location.pathname.includes('/login')) {
+        window.location.replace('/login')
+      }
+    }
+    return Promise.reject(error)
+  }
+)
 
 // ----------------------------
 // Auth
@@ -119,6 +135,24 @@ export const getNotifications = async () => {
 export const markAllRead = async () => {
   // Mark all notifications as read.
   const res = await client.patch('/notifications/read-all')
+  return res.data
+}
+
+// Mark a single notification as read by its ID
+export const markOneRead = async (notifId) => {
+  const res = await client.patch(`/notifications/${notifId}/read`)
+  return res.data
+}
+
+// Update a collaborator's role on a document
+export const updateUserRole = async (documentId, userId, role) => {
+  const res = await client.patch(`/documents/${documentId}/acl/${userId}`, { role })
+  return res.data
+}
+
+// Remove a user's access from a document
+export const removeUserFromDocument = async (documentId, userId) => {
+  const res = await client.delete(`/documents/${documentId}/acl/${userId}`)
   return res.data
 }
 

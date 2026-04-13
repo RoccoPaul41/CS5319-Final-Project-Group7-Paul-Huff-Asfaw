@@ -132,6 +132,20 @@ async function withTransaction(workFn) {
   }
 }
 
+// If the DB (or product rules) require unique titles, pick "Name", "Name (1)", "Name (2)", …
+async function allocateUniqueDocumentTitle(client, baseTitle) {
+  const base = String(baseTitle).trim()
+  if (!base) return base
+  let n = 0
+  while (n < 1000) {
+    const candidate = n === 0 ? base : `${base} (${n})`
+    const taken = await client.query('SELECT 1 FROM documents WHERE title = $1 LIMIT 1', [candidate])
+    if (taken.rows.length === 0) return candidate
+    n += 1
+  }
+  throw new Error('Could not find a free title')
+}
+
 // ============================================
 // AUTH ROUTES SECTION
 // ============================================
@@ -140,18 +154,21 @@ app.post('/api/auth/register', async (req, res) => {
   // Pull user inputs from the request body.
   const { username, email, password } = req.body || {}
 
-  // Validate username.
-  if (!username || String(username).trim().length === 0) {
-    return res.status(400).json({ error: 'Username is required' })
+  // Server-side username rules (never trust only the frontend)
+  if (!/^[a-zA-Z0-9_]{3,20}$/.test(String(username || ''))) {
+    return res.status(400).json({
+      error: 'Username must be 3-20 characters, letters, numbers and underscores only'
+    })
   }
 
-  // Validate email using a simple, standard regex.
-  const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-  if (!email || !emailPattern.test(String(email))) {
-    return res.status(400).json({ error: 'Email must be a valid address (example@domain.com)' })
+  // Server-side email format check
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || ''))) {
+    return res.status(400).json({
+      error: 'Please provide a valid email address'
+    })
   }
 
-  // Validate password length.
+  // Server-side password length
   if (!password || String(password).length < 8) {
     return res.status(400).json({ error: 'Password must be at least 8 characters' })
   }
@@ -301,7 +318,7 @@ app.post('/api/documents', authenticateToken, async (req, res) => {
 
   try {
     const createdDoc = await withTransaction(async (client) => {
-      console.log('Inserting document...')
+      const uniqueTitle = await allocateUniqueDocumentTitle(client, String(title).trim())
 
       // Insert the document row.
       const docResult = await client.query(
@@ -310,8 +327,7 @@ app.post('/api/documents', authenticateToken, async (req, res) => {
         VALUES ($1, $2, $3, $4::visibility_type, NOW(), NOW())
         RETURNING id, title, content, owner_id, visibility, created_at, updated_at
         `,
-        // Cast the parameter to the enum type so PostgreSQL accepts it reliably.
-        [String(title).trim(), '', userId, normalizedVisibility]
+        [uniqueTitle, '', userId, normalizedVisibility]
       )
 
       console.log('Document created:', docResult.rows[0])
@@ -358,11 +374,18 @@ app.post('/api/documents', authenticateToken, async (req, res) => {
 
     return res.json(createdDoc)
   } catch (err) {
-    // Log the full error so we can debug (Postgres gives great details).
     console.error('Error in [POST /api/documents]:', err)
+    // 23505 = unique_violation — should be rare now that titles are disambiguated
+    if (err.code === '23505') {
+      return res.status(409).json({
+        error: 'A document with this title already exists',
+        detail: err.message
+      })
+    }
     return res.status(500).json({
       error: 'Server error while creating document',
-      detail: err.message
+      detail: err.message,
+      code: err.code
     })
   }
 })
@@ -396,7 +419,7 @@ app.get('/api/documents/:id', authenticateToken, async (req, res) => {
     // Load collaborators so the editor can show who else has access.
     const collaboratorsResult = await pool.query(
       `
-      SELECT u.id, u.username, a.role
+      SELECT u.id AS user_id, u.username, a.role
       FROM acl a
       JOIN users u ON a.user_id = u.id
       WHERE a.document_id = $1
@@ -467,16 +490,18 @@ app.put('/api/documents/:id/content', authenticateToken, async (req, res) => {
       await client.query(
         `
         INSERT INTO revisions (document_id, content, version_number, change_description, created_by, created_at, restore_of)
-        VALUES ($1, $2, $3, 'Content updated', $4, NOW(), NULL)
+        VALUES ($1, $2, $3, 'Content saved', $4, NOW(), NULL)
         `,
         [documentId, String(content ?? ''), nextVersionNumber, userId]
       )
 
-      // Load document title for a human-friendly notification.
       const docTitleResult = await client.query('SELECT title FROM documents WHERE id = $1', [documentId])
       const docTitle = docTitleResult.rows[0]?.title || 'a document'
 
-      // Notify every collaborator except the person who saved.
+      const whoRes = await client.query('SELECT username FROM users WHERE id = $1', [userId])
+      const saverName = whoRes.rows[0]?.username || 'Someone'
+
+      // One notification per save for everyone else on the doc (every Save hits this PUT)
       const collaborators = await client.query('SELECT user_id FROM acl WHERE document_id = $1 AND user_id != $2', [documentId, userId])
       for (const row of collaborators.rows) {
         await client.query(
@@ -484,7 +509,7 @@ app.put('/api/documents/:id/content', authenticateToken, async (req, res) => {
           INSERT INTO notifications (user_id, type, document_id, actor_id, message, is_read, created_at)
           VALUES ($1, 'document_edited'::notification_type, $2, $3, $4, false, NOW())
           `,
-          [row.user_id, documentId, userId, `A collaborator edited "${docTitle}"`]
+          [row.user_id, documentId, userId, `"${docTitle}" was modified by ${saverName}`]
         )
       }
 
@@ -499,6 +524,113 @@ app.put('/api/documents/:id/content', authenticateToken, async (req, res) => {
   } catch (err) {
     console.error('[PUT /documents/:id/content] Error:', err)
     return sendDatabaseHelp(res, err, 'Server error while saving document')
+  }
+})
+
+// Shared handler: change acl.role for one user (owner only). PUT is an alias for picky proxies.
+async function handleUpdateCollaboratorRole(req, res) {
+  const ownerUserId = req.user.userId
+  const documentId = Number(req.params.id)
+  const targetUserId = Number(req.params.userId)
+  const newRole = String((req.body || {}).role || '').toLowerCase()
+
+  if (!Number.isFinite(documentId) || documentId <= 0) {
+    return res.status(400).json({ error: 'Invalid document id' })
+  }
+  if (!Number.isFinite(targetUserId) || targetUserId <= 0) {
+    return res.status(400).json({ error: 'Invalid user id' })
+  }
+
+  if (newRole !== 'editor' && newRole !== 'viewer') {
+    return res.status(400).json({ error: 'Role must be editor or viewer' })
+  }
+
+  try {
+    const ownerAcl = await pool.query('SELECT role FROM acl WHERE document_id = $1 AND user_id = $2', [documentId, ownerUserId])
+    if (ownerAcl.rows.length === 0 || ownerAcl.rows[0].role !== 'owner') {
+      return res.status(403).json({ error: 'Only the owner can change roles' })
+    }
+
+    const docRow = await pool.query('SELECT owner_id FROM documents WHERE id = $1', [documentId])
+    if (docRow.rows.length === 0) {
+      return res.status(404).json({ error: 'Document not found' })
+    }
+    if (Number(docRow.rows[0].owner_id) === Number(targetUserId)) {
+      return res.status(400).json({ error: 'Cannot change the owner role this way' })
+    }
+
+    const upd = await pool.query(
+      `UPDATE acl SET role = $1::role_type WHERE document_id = $2 AND user_id = $3 RETURNING user_id`,
+      [newRole, documentId, targetUserId]
+    )
+    if (upd.rows.length === 0) {
+      return res.status(400).json({ error: 'Collaborator not found on this document (check user id)' })
+    }
+
+    return res.json({ message: 'Role updated successfully' })
+  } catch (err) {
+    console.error('[PATCH/PUT /documents/:id/acl/:userId] Error:', err)
+    return sendDatabaseHelp(res, err, 'Server error while updating role')
+  }
+}
+
+app.patch('/api/documents/:id/acl/:userId', authenticateToken, handleUpdateCollaboratorRole)
+app.put('/api/documents/:id/acl/:userId', authenticateToken, handleUpdateCollaboratorRole)
+
+// Remove a user from the document ACL — owner only; notifies the removed user
+app.delete('/api/documents/:id/acl/:userId', authenticateToken, async (req, res) => {
+  const ownerUserId = req.user.userId
+  const documentId = Number(req.params.id)
+  const targetUserId = Number(req.params.userId)
+
+  if (!Number.isFinite(documentId) || documentId <= 0) {
+    return res.status(400).json({ error: 'Invalid document id' })
+  }
+  if (!Number.isFinite(targetUserId) || targetUserId <= 0) {
+    return res.status(400).json({ error: 'Invalid user id' })
+  }
+
+  try {
+    const ownerAcl = await pool.query('SELECT role FROM acl WHERE document_id = $1 AND user_id = $2', [documentId, ownerUserId])
+    if (ownerAcl.rows.length === 0 || ownerAcl.rows[0].role !== 'owner') {
+      return res.status(403).json({ error: 'Only the owner can remove users' })
+    }
+
+    const docRow = await pool.query('SELECT owner_id, title FROM documents WHERE id = $1', [documentId])
+    if (docRow.rows.length === 0) {
+      return res.status(404).json({ error: 'Document not found' })
+    }
+    // Never strip access from the real owner account
+    if (Number(docRow.rows[0].owner_id) === Number(targetUserId)) {
+      return res.status(400).json({ error: 'Cannot remove the document owner' })
+    }
+
+    const title = docRow.rows[0].title || 'this document'
+
+    const removed = await withTransaction(async (client) => {
+      const del = await client.query('DELETE FROM acl WHERE document_id = $1 AND user_id = $2 RETURNING user_id', [documentId, targetUserId])
+      if (del.rows.length === 0) {
+        return false
+      }
+      // Let them know why the doc vanished from their list
+      await client.query(
+        `
+        INSERT INTO notifications (user_id, type, document_id, actor_id, message, is_read, created_at)
+        VALUES ($1, 'user_removed'::notification_type, $2, $3, $4, false, NOW())
+        `,
+        [targetUserId, documentId, ownerUserId, `Your access to "${title}" was removed`]
+      )
+      return true
+    })
+
+    if (!removed) {
+      return res.status(404).json({ error: 'User not on this document' })
+    }
+
+    return res.json({ message: 'User removed successfully' })
+  } catch (err) {
+    console.error('[DELETE /documents/:id/acl/:userId] Error:', err)
+    return sendDatabaseHelp(res, err, 'Server error while removing user')
   }
 })
 
@@ -517,8 +649,25 @@ app.delete('/api/documents/:id', authenticateToken, async (req, res) => {
     }
 
     await withTransaction(async (client) => {
-      // Delete child rows first to avoid foreign key issues if cascades aren’t configured.
-      await client.query('DELETE FROM notifications WHERE document_id = $1', [documentId])
+      const docInfo = await client.query('SELECT title FROM documents WHERE id = $1', [documentId])
+      const deletedTitle = docInfo.rows[0]?.title || 'A document'
+      const actorRes = await client.query('SELECT username FROM users WHERE id = $1', [userId])
+      const deleterName = actorRes.rows[0]?.username || 'Someone'
+
+      // Keep old notification rows — only break the FK so the document row can go away
+      await client.query('UPDATE notifications SET document_id = NULL WHERE document_id = $1', [documentId])
+
+      const stillOnAcl = await client.query('SELECT user_id FROM acl WHERE document_id = $1 AND user_id != $2', [documentId, userId])
+      for (const row of stillOnAcl.rows) {
+        await client.query(
+          `
+          INSERT INTO notifications (user_id, type, document_id, actor_id, message, is_read, created_at)
+          VALUES ($1, 'document_deleted'::notification_type, NULL, $2, $3, false, NOW())
+          `,
+          [row.user_id, userId, `The document "${deletedTitle}" was deleted by ${deleterName}`]
+        )
+      }
+
       await client.query('DELETE FROM revisions WHERE document_id = $1', [documentId])
       await client.query('DELETE FROM acl WHERE document_id = $1', [documentId])
       await client.query('DELETE FROM documents WHERE id = $1', [documentId])
@@ -807,6 +956,26 @@ app.patch('/api/notifications/read-all', authenticateToken, async (req, res) => 
   }
 })
 
+// Mark one notification read — only if it belongs to the logged-in user
+app.patch('/api/notifications/:id/read', authenticateToken, async (req, res) => {
+  const userId = req.user.userId
+  const notifId = Number(req.params.id)
+
+  try {
+    const result = await pool.query(
+      'UPDATE notifications SET is_read = true WHERE id = $1 AND user_id = $2 RETURNING id',
+      [notifId, userId]
+    )
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Notification not found' })
+    }
+    return res.json({ message: 'Marked as read' })
+  } catch (err) {
+    console.error('[PATCH /notifications/:id/read] Error:', err)
+    return sendDatabaseHelp(res, err, 'Server error while marking notification read')
+  }
+})
+
 // ============================================
 // START SERVER
 // ============================================
@@ -820,9 +989,11 @@ pool.query('SELECT NOW()', (err, res) => {
   }
 })
 
-const port = Number(process.env.PORT || 3001)
+// Must match frontend `api.js` baseURL (…:PORT/api) so role/remove calls don’t hit the wrong server
+const port = Number(process.env.PORT || 3002)
 app.listen(port, async () => {
   console.log(`CollabNotes API running on port ${port}`)
+  console.log('ACL: PATCH/PUT /api/documents/:id/acl/:userId   DELETE /api/documents/:id/acl/:userId')
 
   // Try a simple query so we can confirm the DB connection at startup.
   try {
