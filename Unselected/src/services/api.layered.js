@@ -1,6 +1,6 @@
 // ARCHITECTURE: Layered Client-Server
 import axios from 'axios'
-const USE_MOCK = import.meta.env.VITE_USE_MOCK === 'true'
+const USE_MOCK = import.meta.env.VITE_USE_MOCK !== 'false'
 const sleep = (d) => new Promise((r) => setTimeout(r, d))
 let users = [{id:1,username:'rocco.paul',email:'rocco@x.com'},{id:2,username:'dan.huff',email:'dan@x.com'}]
 let docs = [
