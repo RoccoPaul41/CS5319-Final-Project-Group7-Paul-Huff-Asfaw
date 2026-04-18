@@ -62,9 +62,20 @@ you don't need two computers. just open two browser tabs (seperate or incognito 
 
 the Refresh button shows the flow by triggerng a GET request through api.js to server.js which queries the documents table and sends back the latest content
 
+## database tables
+read the backend\readme for this information 
+
+---
+
+## notes
+- passwords are  bcrypt hashed, never stored as  plain text
+-every protected route checks a  jwt token before doing anything
+-  when deleting a document cascades and cleans up acl, revisions, and notifications automatically
+
 
 ## files and what they do
 
+```
 Selected/
 ├── backend /
 │   ├── server.js       - the entire backend, all routes and db queries in one file
@@ -87,12 +98,3 @@ Selected/
  ── run.bat      - starts everything on Windows
 └── README.md       - what you are reading!
 
-
-## database tables
-read the backend\readme for this information 
-
-
-## notes
-- passwords are  bcrypt hashed, never stored as  plain text
--every protected route checks a  jwt token before doing anything
--  when deleting a document cascades and cleans up acl, revisions, and notifications automatically
