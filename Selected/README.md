@@ -65,7 +65,6 @@ the Refresh button shows the flow by triggerng a GET request through api.js to s
 
 ## files and what they do
 
-```
 Selected/
 ├── backend /
 │   ├── server.js       - the entire backend, all routes and db queries in one file
@@ -92,7 +91,6 @@ Selected/
 ## database tables
 read the backend\readme for this information 
 
----
 
 ## notes
 - passwords are  bcrypt hashed, never stored as  plain text
