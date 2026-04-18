@@ -1,10 +1,7 @@
-// ============================================
-// PRESENTATION LAYER — Login Page
-// This is the CLIENT side of the Layered Architecture.
-// Responsibility: Show UI and handle user interactions.
-// All data comes from api.js — no direct DB or server calls.
-// ============================================
-
+// # presentation layer - login and register page
+// # this is as far as you get without authenticating
+// # once login works the backend sends back a jwt token
+// # we store that token and use it for every request after
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { loginUser, registerUser } from '../api.js'
@@ -20,35 +17,28 @@ const COLORS = {
 }
 
 export default function LoginPage() {
-  // Track which tab the user is on.
   const [tab, setTab] = useState('login')
 
-  // Track inputs.
   const [username, setUsername] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
 
-  // Track UI states.
   const [loading, setLoading] = useState(false)
-  const [bannerError, setBannerError] = useState('')
+  const [err, setErr] = useState('')
 
-  // Track field-level errors for registration.
   const [fieldErrors, setFieldErrors] = useState({ username: '', email: '', password: '', confirmPassword: '' })
 
   const navigate = useNavigate()
 
-  // Email regex required by your spec.
   const emailPattern = useMemo(() => /^[^\s@]+@[^\s@]+\.[^\s@]+$/, [])
 
   const resetErrors = () => {
-    // Clear errors whenever the user switches modes or retries.
-    setBannerError('')
+    setErr('')
     setFieldErrors({ username: '', email: '', password: '', confirmPassword: '' })
   }
 
   const validateRegister = () => {
-    // Build a new error object for each field (used on submit).
     const errors = { username: '', email: '', password: '', confirmPassword: '' }
 
     if (!/^[a-zA-Z0-9_]{3,20}$/.test(username.trim())) {
@@ -72,7 +62,6 @@ export default function LoginPage() {
     return !errors.username && !errors.email && !errors.password && !errors.confirmPassword
   }
 
-  // Live rules for disabling the Create Account button
   const registerLooksGood = useMemo(() => {
     const uOk = /^[a-zA-Z0-9_]{3,20}$/.test(username.trim())
     const eOk = emailPattern.test(email.trim())
@@ -81,7 +70,6 @@ export default function LoginPage() {
     return uOk && eOk && pOk && cOk
   }, [username, email, password, confirmPassword, emailPattern])
 
-  // Tiny password strength hint for the register form only
   const pwdStrength = useMemo(() => {
     if (password.length < 8) return { label: 'Too short', color: '#EF4444', width: '33%' }
     const hasNum = /\d/.test(password)
@@ -91,60 +79,46 @@ export default function LoginPage() {
   }, [password])
 
   const handleLogin = async (e) => {
-    // Prevent the browser from reloading the page.
     e.preventDefault()
 
-    // Reset any old errors before a new attempt.
     resetErrors()
     setLoading(true)
 
     try {
-      // Ask the API layer to authenticate the user.
       const data = await loginUser(username.trim(), password)
 
-      // Save token and user so the router can protect routes.
       localStorage.setItem('cn_token', data.token)
       localStorage.setItem('cn_user', JSON.stringify(data.user))
 
-      // Send the user to the dashboard.
       navigate('/dashboard')
     } catch (err) {
-      // Show the server’s message if available.
       const message = err?.response?.data?.error || 'Login failed'
-      setBannerError(message)
+      setErr(message)
     } finally {
-      // Always stop the loading state.
       setLoading(false)
     }
   }
 
   const handleRegister = async (e) => {
-    // Prevent the browser from reloading the page.
     e.preventDefault()
 
-    // Reset any old errors before a new attempt.
     resetErrors()
 
-    // Stop early if validation fails.
     if (!validateRegister()) return
 
     setLoading(true)
     try {
-      // Create the account first.
       await registerUser(username.trim(), email.trim(), password)
 
-      // Immediately log in after registration (nice UX).
       const data = await loginUser(username.trim(), password)
 
-      // Persist auth data.
       localStorage.setItem('cn_token', data.token)
       localStorage.setItem('cn_user', JSON.stringify(data.user))
 
-      // Go to dashboard.
       navigate('/dashboard')
     } catch (err) {
       const message = err?.response?.data?.error || 'Registration failed'
-      setBannerError(message)
+      setErr(message)
     } finally {
       setLoading(false)
     }
@@ -259,7 +233,7 @@ export default function LoginPage() {
         ) : null}
 
         {/* Banner error */}
-        {bannerError ? (
+        {err ? (
           <div
             style={{
               marginTop: 14,
@@ -271,7 +245,7 @@ export default function LoginPage() {
               fontSize: 13
             }}
           >
-            {bannerError}
+            {err}
           </div>
         ) : null}
 

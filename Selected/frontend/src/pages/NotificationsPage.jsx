@@ -1,74 +1,60 @@
-// ============================================
-// PRESENTATION LAYER — Notifications Page
-// This is the CLIENT side of the Layered Architecture.
-// Responsibility: Show UI and handle user interactions.
-// All data comes from api.js — no direct DB or server calls.
-// ============================================
+// presentation layer: notifications
+//the backend creates notification rows whenever something happens (share, edit, restore)
 
 import { useEffect, useMemo, useState } from 'react'
+
 import Navbar from '../components/Navbar.jsx'
 import { getNotifications, markAllRead, markOneRead } from '../api.js'
 
-const COLORS = {
-  primary: '#4F46E5',
-  background: '#F9FAFB',
-  surface: '#FFFFFF',
-  border: '#E5E7EB',
-  text: '#111827',
-  muted: '#6B7280'
-}
+const COLORS = {primary: '#4F46E5',background: '#F9FAFB',surface: '#FFFFFF',border: '#E5E7EB', text: '#111827',muted: '#6B7280'}
 
-function timeAgo(iso) {
-  // Convert timestamp into a short relative label.
+function timeAgo(iso) 
+{
   const minutes = Math.floor((Date.now() - new Date(iso).getTime()) / 60000)
+
   if (Number.isNaN(minutes)) return 'just now'
   if (minutes < 60) return `${minutes} min ago`
   if (minutes < 1440) return `${Math.floor(minutes / 60)} hr ago`
   return 'Yesterday'
 }
 
-export default function NotificationsPage() {
-  // Store notifications from the server.
+export default function NotificationsPage() 
+{
   const [notifications, setNotifications] = useState([])
-
-  // Store which filter tab is selected.
-  const [filter, setFilter] = useState('all') // all | shares | edits | restores | deletes
+  const [filter, setFilter] = useState('all') // all ... shares, edits, restores & deletes
 
   const load = async () => {
-    // Load notifications from the API layer.
     const data = await getNotifications()
     setNotifications(data)
   }
 
-  useEffect(() => {
-    // Load notifications when the page opens.
+  useEffect(() => 
+    {
     load().catch((e) => console.error(e))
   }, [])
 
-  // Compute unread badge for the navbar.
   const unreadCount = useMemo(() => notifications.filter((n) => !n.is_read).length, [notifications])
 
-  // Filter notifications client-side, as requested.
-  const filtered = useMemo(() => {
+  const filtered = useMemo(() => 
+    {
     if (filter === 'all') return notifications
-    // Backend enum values are lowercase, per your schema.
+
     if (filter === 'shares') return notifications.filter((n) => n.type === 'document_shared')
     if (filter === 'edits') return notifications.filter((n) => n.type === 'document_edited')
+
     if (filter === 'restores') return notifications.filter((n) => n.type === 'version_restored')
     if (filter === 'deletes') return notifications.filter((n) => n.type === 'document_deleted')
     return notifications
   }, [notifications, filter])
 
-  const handleMarkAllRead = async () => {
-    // Tell the API to mark all notifications as read.
+  const handleMarkAllRead = async () => 
+    {
     await markAllRead()
-
-    // Reload so the UI updates.
     await load()
   }
 
-  const markOneReadLocal = async (notifId) => {
-    // Flip the blue dot immediately, then sync with the server
+  const markOneReadLocal = async (notifId) => 
+    {
     setNotifications((prev) => prev.map((n) => (n.id === notifId ? { ...n, is_read: true } : n)))
     try {
       await markOneRead(notifId)
@@ -99,7 +85,6 @@ export default function NotificationsPage() {
           </button>
         </div>
 
-        {/* Filter tabs */}
         <div style={{ display: 'flex', gap: 16, borderBottom: `1px solid ${COLORS.border}`, marginBottom: 12 }}>
           {[
             { key: 'all', label: 'All' },
@@ -126,7 +111,6 @@ export default function NotificationsPage() {
           ))}
         </div>
 
-        {/* Notifications list */}
         <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 12 }}>
           {filtered.map((n) => (
             <div

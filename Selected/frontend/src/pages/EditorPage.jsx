@@ -1,10 +1,7 @@
-// ============================================
-// PRESENTATION LAYER — Editor Page
-// This is the CLIENT side of the Layered Architecture.
-// Responsibility: Show UI and handle user interactions.
-// All data comes from api.js — no direct DB or server calls.
-// ============================================
-
+// # presentation layer - document editor
+// # saves go to the api layer which updates postgres
+// # and creates a revision entry automatically
+// # the refresh button pulls the latest version down
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import Navbar from '../components/Navbar.jsx'
@@ -19,50 +16,26 @@ const COLORS = {
   muted: '#6B7280'
 }
 
-export default function EditorPage() {
-  // Read the document id from the URL.
+export default function EditorPage() 
+{
   const { id } = useParams()
-
-  // Router helper for navigation.
-  const navigate = useNavigate()
-
-  // Optional message after returning from version restore
+  const navigate= useNavigate()
   const location = useLocation()
-
-  // Store the loaded document.
-  const [document, setDocument] = useState(null)
-
-  // Store editable content in state.
-  const [content, setContent] = useState('')
-
-  // Track save state for user feedback.
+  const [doc, setDoc] = useState(null)
+  const [content, setContent]= useState('')
   const [lastSavedText, setLastSavedText] = useState('')
-  const [savedFlash, setSavedFlash] = useState(false)
-
-  // Notification count for the navbar badge.
-  const [unreadCount, setUnreadCount] = useState(0)
-
-  // Copy of collaborators we can update when roles change (owner UI)
+  const [savedFlash, setSavedFlash] =useState(false)
+  const [unreadCount, setUnreadCount] =useState(0)
   const [collaborators, setCollaborators] = useState([])
+  const [roleSavedUserId, setRoleSavedUserId]= useState(null)
+  const [restoreBanner, setRestoreBanner] =useState('')
 
-  // Brief “Saved” label next to a role dropdown after a successful PATCH
-  const [roleSavedUserId, setRoleSavedUserId] = useState(null)
+  const loadDoc =async () => {
+    const d = await getDocument(id)
+    setDoc(d)
+    setContent(d.content || '')
 
-  // One-time banner when user lands here after restoring a revision
-  const [restoreBanner, setRestoreBanner] = useState('')
-
-  const loadDoc = async () => {
-    // Fetch the latest version of the document.
-    const doc = await getDocument(id)
-
-    // Save the document object for UI rendering.
-    setDocument(doc)
-
-    // Put the content into the editor textarea.
-    setContent(doc.content || '')
-
-    // Normalize ACL rows: DB/README use user_id; older responses may only have id
-    const raw = doc.collaborators || []
+    const raw = d.collaborators || []
     setCollaborators(
       raw.map((c) => ({
         ...c,
@@ -71,20 +44,18 @@ export default function EditorPage() {
     )
   }
 
-  const loadUnread = async () => {
-    // Fetch notifications so we can show an unread badge in the navbar.
-    const notifs = await getNotifications()
+  const loadUnread = async () => 
+    {
+    const notifs= await getNotifications()
     setUnreadCount(notifs.filter((n) => !n.is_read).length)
   }
 
   useEffect(() => {
-    // Load the document and notification badge when this page opens.
     loadDoc().catch((e) => console.error(e))
     loadUnread().catch((e) => console.error(e))
   }, [id])
 
   useEffect(() => {
-    // Version history sends a flash message through router state
     const msg = location.state && location.state.restoreMessage
     if (msg) {
       setRestoreBanner(String(msg))
@@ -92,28 +63,24 @@ export default function EditorPage() {
     }
   }, [location.state, location.pathname, navigate])
 
-  // This determines whether the user can edit.
-  const isViewer = useMemo(() => String(document?.your_role || '').toLowerCase() === 'viewer', [document])
+  const isViewer = useMemo(() => String(doc?.your_role || '').toLowerCase() === 'viewer', [doc])
 
   const handleSave = async () => {
-    // Send the content to the API layer to be saved.
     const result = await saveDocument(id, content)
 
-    // Convert the updated timestamp into a human-friendly label.
     const time = new Date(result.updatedAt).toLocaleTimeString()
     setLastSavedText(`Last saved: ${time}`)
 
-    // Show a brief "Saved!" success message.
     setSavedFlash(true)
     setTimeout(() => setSavedFlash(false), 2000)
   }
 
-  const handleRefresh = async () => {
-    // Pull latest text from server first
-    const doc = await getDocument(id)
-    setDocument(doc)
-    setContent(doc.content || '')
-    const raw = doc.collaborators || []
+  const handleRefresh = async () => 
+    {
+    const d = await getDocument(id)
+    setDoc(d)
+    setContent(d.content || '')
+    const raw = d.collaborators || []
     setCollaborators(
       raw.map((c) => ({
         ...c,
@@ -121,10 +88,9 @@ export default function EditorPage() {
       }))
     )
 
-    // Same as Save: persist a revision snapshot when editors/owners refresh
-    const canEdit = String(doc.your_role || '').toLowerCase() !== 'viewer'
+    const canEdit = String(d.your_role || '').toLowerCase() !== 'viewer'
     if (canEdit) {
-      const result = await saveDocument(id, doc.content || '')
+      const result = await saveDocument(id, d.content || '')
       const time = new Date(result.updatedAt).toLocaleTimeString()
       setLastSavedText(`Last saved: ${time}`)
       setSavedFlash(true)
@@ -132,7 +98,6 @@ export default function EditorPage() {
     }
   }
 
-  // Logged-in profile (used to see if we’re the owner for ACL controls)
   const currentUser = useMemo(() => {
     try {
       return JSON.parse(localStorage.getItem('cn_user') || 'null')
@@ -141,10 +106,9 @@ export default function EditorPage() {
     }
   }, [])
 
-  const isDocumentOwner = currentUser && document && Number(currentUser.id) === Number(document.owner_id)
+  const isDocumentOwner =currentUser && doc && Number(currentUser.id) === Number(doc.owner_id)
 
   const changeUserRole = async (userId, newRole) => {
-    // Only the document owner can change roles — server enforces too
     try {
       await updateUserRole(id, userId, newRole)
       setCollaborators((prev) => prev.map((c) => (Number(c.user_id) === Number(userId) ? { ...c, role: newRole } : c)))
@@ -156,7 +120,6 @@ export default function EditorPage() {
   }
 
   const removeUser = async (userId, username) => {
-    // Confirm before removing someone’s access entirely
     if (!window.confirm(`Remove ${username}'s access to this document?`)) return
     try {
       await removeUserFromDocument(id, userId)
@@ -166,8 +129,7 @@ export default function EditorPage() {
     }
   }
 
-  // If the document hasn’t loaded yet, show a simple loading state.
-  if (!document) {
+  if (!doc) {
     return (
       <div style={{ background: COLORS.background, minHeight: '100vh' }}>
         <Navbar unreadCount={unreadCount} />
@@ -194,7 +156,7 @@ export default function EditorPage() {
           }}
         >
           <div>
-            <div style={{ fontSize: 18, fontWeight: 900, color: COLORS.text }}>{document.title}</div>
+            <div style={{ fontSize: 18, fontWeight: 900, color: COLORS.text }}>{doc.title}</div>
             <div style={{ marginTop: 4, fontSize: 12, color: COLORS.muted }}>{lastSavedText || 'Last saved: not yet'}</div>
           </div>
 
@@ -217,7 +179,6 @@ export default function EditorPage() {
               Refresh
             </button>
 
-            {/* Hide Save button for viewers to match role enforcement rule. */}
             {!isViewer ? (
               <button
                 onClick={handleSave}
@@ -241,7 +202,6 @@ export default function EditorPage() {
         {/* “Saved!” flash */}
         {savedFlash ? <div style={{ marginTop: 10, color: '#10B981', fontWeight: 900 }}>Saved!</div> : null}
 
-        {/* After restore, show a short confirmation at the top of the editor */}
         {restoreBanner ? (
           <div style={{ marginTop: 10, color: '#10B981', fontWeight: 800, fontSize: 14 }}>{restoreBanner}</div>
         ) : null}

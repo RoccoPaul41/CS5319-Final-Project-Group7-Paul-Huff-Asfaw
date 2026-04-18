@@ -1,51 +1,25 @@
-// ============================================
-// PRESENTATION LAYER — Navbar
-// This is a reusable UI element shown on every page
-// except the login screen. It stays “dumb” and only
-// displays what it’s given through props.
-// ============================================
-
+// shared nav component used across all pages, reads the username from localstorage, logout just clears the token and sends you back to login
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 
-const COLORS = {
-  primary: '#4F46E5',
-  surface: '#FFFFFF',
-  border: '#E5E7EB',
-  text: '#111827',
-  muted: '#6B7280',
-  danger: '#EF4444'
-}
-
-export default function Navbar({ unreadCount }) {
-  // Read the logged-in user from localStorage.
+const COLORS = {primary: '#4F46E5',surface: '#FFFFFF', border: '#E5E7EB',text: '#111827',muted: '#6B7280', danger: '#EF4444'}
+export default function Navbar({ unreadCount }) 
+{
   const user = JSON.parse(localStorage.getItem('cn_user') || 'null')
 
-  // Router helpers.
   const navigate = useNavigate()
+
   const location = useLocation()
 
-  const linkStyle = (path) => {
-    // Determine active state for a simple underline highlight.
+  const linkStyle = (path) => 
+    {
     const isActive =
       location.pathname === path ||
-      // Keep "Documents" active while you're inside the editor/history routes.
       (path === '/documents' && location.pathname.startsWith('/documents/'))
 
-    return {
-      padding: '0 6px',
-      height: '56px',
-      display: 'flex',
-      alignItems: 'center',
-      textDecoration: 'none',
-      color: isActive ? COLORS.primary : COLORS.muted,
-      borderBottom: isActive ? `2px solid ${COLORS.primary}` : '2px solid transparent',
-      fontWeight: 600,
-      fontSize: 14
-    }
+    return { padding: '0 6px',height: '56px',display: 'flex',alignItems: 'center',textDecoration: 'none',color: isActive ? COLORS.primary : COLORS.muted,borderBottom: isActive ? `2px solid ${COLORS.primary}` : '2px solid transparent',fontWeight: 600,fontSize: 14}
   }
 
   const handleLogout = () => {
-    // Clear auth and send the user back to login.
     localStorage.removeItem('cn_token')
     localStorage.removeItem('cn_user')
     navigate('/login')

@@ -1,10 +1,7 @@
-// ============================================
-// PRESENTATION LAYER — Version History Page
-// This is the CLIENT side of the Layered Architecture.
-// Responsibility: Show UI and handle user interactions.
-// All data comes from api.js — no direct DB or server calls.
-// ============================================
-
+// # presentation layer - version history
+// # every save creates a row in the revisions table
+// # restoring just copies old content into a new revision
+// # the actual restore logic lives in the api layer
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import Navbar from '../components/Navbar.jsx'
@@ -20,46 +17,33 @@ const COLORS = {
 }
 
 export default function VersionHistoryPage() {
-  // Read the document id from the URL.
   const { id } = useParams()
 
-  // Router helper for navigation.
   const navigate = useNavigate()
 
-  // Store the document title for the header.
-  const [documentTitle, setDocumentTitle] = useState('')
+  const [title, setTitle] = useState('')
 
-  // Store revisions newest-first.
   const [revisions, setRevisions] = useState([])
 
-  // Store unread count for navbar badge.
   const [unreadCount, setUnreadCount] = useState(0)
 
-  // Click a row to pin the text preview open/closed
   const [previewId, setPreviewId] = useState(null)
 
-  // Hovering a row also reveals the same preview (no click needed)
   const [hoverPreviewId, setHoverPreviewId] = useState(null)
 
-  // Disable only the Restore button that’s in flight
   const [restoringId, setRestoringId] = useState(null)
 
   const load = async () => {
-    // Load document, revisions, and notifications in parallel.
     const [doc, revs, notifs] = await Promise.all([getDocument(id), getRevisions(id), getNotifications()])
 
-    // Save the title for the header.
-    setDocumentTitle(doc.title || '')
+    setTitle(doc.title || '')
 
-    // Save revision list.
     setRevisions(revs)
 
-    // Compute unread badge count.
     setUnreadCount(notifs.filter((n) => !n.is_read).length)
   }
 
   useEffect(() => {
-    // Load the page data when the page opens.
     load().catch((e) => console.error(e))
   }, [id])
 
@@ -88,9 +72,8 @@ export default function VersionHistoryPage() {
       <Navbar unreadCount={unreadCount} />
 
       <div style={{ maxWidth: 1280, margin: '0 auto', padding: 16 }}>
-        {/* Page header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-          <div style={{ fontSize: 24, fontWeight: 900, color: COLORS.text }}>Version History — {documentTitle}</div>
+          <div style={{ fontSize: 24, fontWeight: 900, color: COLORS.text }}>Version History — {title}</div>
           <button
             onClick={() => navigate(`/documents/${id}`)}
             style={{ height: 34, borderRadius: 8, border: `1px solid ${COLORS.border}`, background: 'transparent', cursor: 'pointer', fontWeight: 900 }}
@@ -99,10 +82,8 @@ export default function VersionHistoryPage() {
           </button>
         </div>
 
-        {/* Revisions list */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {revisions.map((rev, index) => {
-            // Newest revision matches live editor content — that’s the “current” one
             const isCurrent = index === 0
             const snippet = String(rev.content || '').slice(0, 200)
 
@@ -148,7 +129,6 @@ export default function VersionHistoryPage() {
 
                 <div style={{ marginTop: 8, color: COLORS.text, fontSize: 14 }}>{rev.change_description || 'Saved'}</div>
 
-                {/* First chunk of that revision’s text — click the card above to show/hide */}
                 {previewId === rev.id || hoverPreviewId === rev.id ? (
                   <div
                     style={{

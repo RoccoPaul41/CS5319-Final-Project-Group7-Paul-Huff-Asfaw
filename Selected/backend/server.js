@@ -1,12 +1,3 @@
-// ============================================
-// LAYER: API Layer — Entry point for all client requests
-// This file IS the entire server. It handles HTTP requests
-// from the React frontend (Client Layer) and talks to
-// PostgreSQL (Data Layer) directly using SQL queries.
-// In a Layered Architecture: Client → API → Data
-// ============================================
-
-// Bring in the packages we’re allowed to use.
 const express = require('express')
 const { Pool } = require('pg')
 const bcrypt = require('bcrypt')
@@ -14,32 +5,21 @@ const jwt = require('jsonwebtoken')
 const cors = require('cors')
 require('dotenv').config()
 
-// Create the Express app (this is our HTTP server).
+
+//Here is the api layer of our layered client-server architecture sitting between the frontend and the database
+//the frontend is the presentation layer and the database is the data layer
+// goes through here first before going to the database
+
 const app = express()
 
-// Create a Postgres connection pool using credentials from .env.
-const pool = new Pool({
-  host: process.env.DB_HOST,
-  port: Number(process.env.DB_PORT),
-  database: process.env.DB_NAME,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD
-})
+const pool = new Pool ({host: process.env.DB_HOST,port: Number(process.env.DB_PORT),database: process.env.DB_NAME,user: process.env.DB_USER,password: process.env.DB_PASSWORD})
 
-// Allow the Vite dev server to call this API from the browser.
-app.use(
-  cors({
-    origin: 'http://localhost:5173',
-    credentials: true
-  })
-)
-
-// Parse JSON request bodies automatically.
+app.use(cors({ origin: 'http://localhost:5173', credentials: true }))
 app.use(express.json())
 
-// Helper that turns common Postgres errors into human-friendly messages.
+//map common postgres errors to something readable for the frontend
 function sendDatabaseHelp(res, err, fallbackMessage) {
-  // 28P01 = invalid_password (wrong username/password)
+  //wrong db user or password
   if (err?.code === '28P01') {
     return res.status(500).json({
       error:
@@ -47,7 +27,7 @@ function sendDatabaseHelp(res, err, fallbackMessage) {
     })
   }
 
-  // 3D000 = invalid_catalog_name (database does not exist)
+  //database name doesnt exist
   if (err?.code === '3D000') {
     return res.status(500).json({
       error:
@@ -55,7 +35,7 @@ function sendDatabaseHelp(res, err, fallbackMessage) {
     })
   }
 
-  // 42P01 = undefined_table (tables not created / wrong schema)
+  //missing tables or wrong schema
   if (err?.code === '42P01') {
     return res.status(500).json({
       error:
@@ -64,75 +44,54 @@ function sendDatabaseHelp(res, err, fallbackMessage) {
     })
   }
 
-  // Default: return the original fallback message.
   return res.status(500).json({ error: fallbackMessage, detail: err?.message })
 }
 
-// ============================================
-// AUTH MIDDLEWARE SECTION
-// Middleware that checks JWT token on protected routes
-// Every request to a protected endpoint passes through here
-// before hitting the route handler
-// ============================================
-
+//middleware checks jwt before protected routes, stops you if its missing or invalid
 function authenticateToken(req, res, next) {
-  // Read the Authorization header in the form: "Bearer <token>".
   const authHeader = req.headers['authorization']
 
-  // If the header is missing, the client is not logged in.
   if (!authHeader) {
     return res.status(401).json({ error: 'Missing Authorization header' })
   }
 
-  // Split "Bearer <token>" into parts and grab the token.
   const parts = authHeader.split(' ')
   const token = parts.length === 2 ? parts[1] : null
 
-  // If the token is missing, we can’t authenticate the request.
   if (!token) {
     return res.status(401).json({ error: 'Missing Bearer token' })
   }
 
-  // Verify the token using our secret.
   jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
-    // If verification fails, the token is invalid or expired.
     if (err) {
       return res.status(403).json({ error: 'Invalid or expired token' })
     }
 
-    // Attach the decoded user identity to the request for later handlers.
     req.user = decoded
 
-    // Continue to the actual route handler.
     next()
   })
 }
 
-// Helper that runs a group of SQL statements as one transaction.
+//transaction wrapper so a multi step save or share cant half finish
 async function withTransaction(workFn) {
-  // Get a dedicated client from the pool for the transaction.
   const client = await pool.connect()
   try {
-    // Start the transaction.
     await client.query('BEGIN')
 
-    // Run the provided work function (it receives the transaction client).
     const result = await workFn(client)
 
-    // If everything worked, commit the transaction.
     await client.query('COMMIT')
     return result
   } catch (err) {
-    // If anything fails, roll back the transaction.
     await client.query('ROLLBACK')
     throw err
   } finally {
-    // Always release the client back to the pool.
     client.release()
   }
 }
 
-// If the DB (or product rules) require unique titles, pick "Name", "Name (1)", "Name (2)", …
+//if the title is taken we append (1) (2) etc until its free
 async function allocateUniqueDocumentTitle(client, baseTitle) {
   const base = String(baseTitle).trim()
   if (!base) return base
@@ -146,115 +105,94 @@ async function allocateUniqueDocumentTitle(client, baseTitle) {
   throw new Error('Could not find a free title')
 }
 
-// ============================================
-// AUTH ROUTES SECTION
-// ============================================
-
+//auth routes dont need a token
 app.post('/api/auth/register', async (req, res) => {
-  // Pull user inputs from the request body.
   const { username, email, password } = req.body || {}
 
-  // Server-side username rules (never trust only the frontend)
   if (!/^[a-zA-Z0-9_]{3,20}$/.test(String(username || ''))) {
     return res.status(400).json({
       error: 'Username must be 3-20 characters, letters, numbers and underscores only'
     })
   }
 
-  // Server-side email format check
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || ''))) {
     return res.status(400).json({
       error: 'Please provide a valid email address'
     })
   }
 
-  // Server-side password length
   if (!password || String(password).length < 8) {
     return res.status(400).json({ error: 'Password must be at least 8 characters' })
   }
 
   try {
-    // Check whether the username is already taken.
-    const existingUsername = await pool.query('SELECT id FROM users WHERE username = $1', [username])
-    if (existingUsername.rows.length > 0) {
+    const takenUser = await pool.query('SELECT id FROM users WHERE username = $1', [username])
+    if (takenUser.rows.length > 0) {
       return res.status(400).json({ error: 'Username already exists' })
     }
 
-    // Check whether the email is already taken.
-    const existingEmail = await pool.query('SELECT id FROM users WHERE email = $1', [email])
-    if (existingEmail.rows.length > 0) {
+    const takenEmail = await pool.query('SELECT id FROM users WHERE email = $1', [email])
+    if (takenEmail.rows.length > 0) {
       return res.status(400).json({ error: 'Email already exists' })
     }
 
-    // Hash the password so we never store plain-text passwords.
-    const passwordHash = await bcrypt.hash(String(password), 10)
+    //hash password before saving never store plaintext
+    const hashed = await bcrypt.hash(String(password), 10)
 
-    // Insert the new user into the database.
     await pool.query(
       'INSERT INTO users (username, email, password, created_at, last_login) VALUES ($1, $2, $3, NOW(), NULL)',
-      [username, email, passwordHash]
+      [username, email, hashed]
     )
 
-    // Tell the client that registration succeeded.
     return res.json({ message: 'Account created successfully' })
   } catch (err) {
-    // Log server errors so we can debug them.
     console.error('[REGISTER] Error:', err)
     return sendDatabaseHelp(res, err, 'Server error while creating account')
   }
 })
 
 app.post('/api/auth/login', async (req, res) => {
-  // Pull user inputs from the request body.
   const { username, password } = req.body || {}
 
-  // Require both fields.
   if (!username || !password) {
     return res.status(400).json({ error: 'Username and password are required' })
   }
 
   try {
-    // Find the user by username.
-    const userResult = await pool.query('SELECT id, username, email, password FROM users WHERE username = $1', [username])
+    const userRes = await pool.query('SELECT id, username, email, password FROM users WHERE username = $1', [username])
 
-    // If no user exists, return a generic auth error.
-    if (userResult.rows.length === 0) {
+    if (userRes.rows.length === 0) {
       return res.status(401).json({ error: 'Invalid username or password' })
     }
 
-    const userRow = userResult.rows[0]
+    const usr = userRes.rows[0]
 
-    // Compare the submitted password against the stored bcrypt hash.
-    const passwordMatches = await bcrypt.compare(String(password), String(userRow.password))
-    if (!passwordMatches) {
+    //bcrypt compare for login
+    const ok = await bcrypt.compare(String(password), String(usr.password))
+    if (!ok) {
       return res.status(401).json({ error: 'Invalid username or password' })
     }
 
-    // Update the last login timestamp for the user.
-    await pool.query('UPDATE users SET last_login = NOW() WHERE id = $1', [userRow.id])
+    await pool.query('UPDATE users SET last_login = NOW() WHERE id = $1', [usr.id])
 
-    // Create a JWT token that expires in 24 hours.
     const token = jwt.sign(
-      { userId: userRow.id, username: userRow.username },
+      { userId: usr.id, username: usr.username },
       process.env.JWT_SECRET,
       { expiresIn: '24h' }
     )
 
-    // Optionally record a session row (matches the schema’s sessions table).
     try {
       await pool.query(
         'INSERT INTO sessions (user_id, token, created_at, expires_at, is_active) VALUES ($1, $2, NOW(), NOW() + INTERVAL \'24 hours\', true)',
-        [userRow.id, token]
+        [usr.id, token]
       )
     } catch (sessionErr) {
-      // If sessions table isn’t present, we still allow login to work.
       console.warn('[LOGIN] Could not write session row (continuing):', sessionErr.message)
     }
 
-    // Return token and basic user profile.
     return res.json({
       token,
-      user: { id: userRow.id, username: userRow.username, email: userRow.email }
+      user: { id: usr.id, username: usr.username, email: usr.email }
     })
   } catch (err) {
     console.error('[LOGIN] Error:', err)
@@ -262,17 +200,13 @@ app.post('/api/auth/login', async (req, res) => {
   }
 })
 
-// ============================================
-// DOCUMENT ROUTES SECTION
-// ============================================
-
+//document routes need a valid token, authenticateToken always runs first
 app.get('/api/documents', authenticateToken, async (req, res) => {
-  // Use the authenticated user id from the JWT.
   const userId = req.user.userId
 
   try {
-    // Select documents this user has access to through ACL, plus owner username and the user’s role.
-    const result = await pool.query(
+    //pg pool query joins acl so you only see docs youre allowed to access
+    const r = await pool.query(
       `
       SELECT
         d.id,
@@ -293,8 +227,7 @@ app.get('/api/documents', authenticateToken, async (req, res) => {
       [userId]
     )
 
-    // Return the list to the client.
-    return res.json(result.rows)
+    return res.json(r.rows)
   } catch (err) {
     console.error('[GET /documents] Error:', err)
     return sendDatabaseHelp(res, err, 'Server error while loading documents')
@@ -305,23 +238,19 @@ app.post('/api/documents', authenticateToken, async (req, res) => {
   const userId = req.user.userId
   const { title, visibility } = req.body || {}
 
-  // Trace the flow so we can see where creation fails.
   console.log('Creating document for user:', userId)
 
-  // Make sure the user gives the document a title.
   if (!title || String(title).trim().length === 0) {
     return res.status(400).json({ error: 'Title is required' })
   }
 
-  // Only allow the two visibility values our schema supports (lowercase enum).
   const normalizedVisibility = String(visibility || 'private').toLowerCase() === 'shared' ? 'shared' : 'private'
 
   try {
     const createdDoc = await withTransaction(async (client) => {
       const uniqueTitle = await allocateUniqueDocumentTitle(client, String(title).trim())
 
-      // Insert the document row.
-      const docResult = await client.query(
+      const docRes = await client.query(
         `
         INSERT INTO documents (title, content, owner_id, visibility, created_at, updated_at)
         VALUES ($1, $2, $3, $4::visibility_type, NOW(), NOW())
@@ -330,13 +259,12 @@ app.post('/api/documents', authenticateToken, async (req, res) => {
         [uniqueTitle, '', userId, normalizedVisibility]
       )
 
-      console.log('Document created:', docResult.rows[0])
+      console.log('Document created:', docRes.rows[0])
 
-      const doc = docResult.rows[0]
+      const doc = docRes.rows[0]
 
       console.log('Inserting ACL entry...')
 
-      // Give the creator owner access in ACL.
       await client.query(
         `
         INSERT INTO acl (document_id, user_id, role, granted_at, granted_by)
@@ -347,7 +275,6 @@ app.post('/api/documents', authenticateToken, async (req, res) => {
 
       console.log('Inserting revision...')
 
-      // Create version 1 in revisions.
       await client.query(
         `
         INSERT INTO revisions (document_id, content, version_number, change_description, created_by, created_at, restore_of)
@@ -356,8 +283,6 @@ app.post('/api/documents', authenticateToken, async (req, res) => {
         [doc.id, '', userId]
       )
 
-      // Notify the creator that the document was created (lowercase enum).
-      // Create a notification for the creator.
       await client.query(
         `
         INSERT INTO notifications (user_id, type, document_id, actor_id, message, is_read, created_at)
@@ -366,7 +291,6 @@ app.post('/api/documents', authenticateToken, async (req, res) => {
         [userId, doc.id, `You created "${doc.title}"`]
       )
 
-      // Add the owner username so the frontend doesn’t need a second query.
       const ownerName = await client.query('SELECT username FROM users WHERE id = $1', [userId])
       console.log('Document creation complete')
       return { ...doc, owner_username: ownerName.rows[0]?.username, your_role: 'owner' }
@@ -375,7 +299,6 @@ app.post('/api/documents', authenticateToken, async (req, res) => {
     return res.json(createdDoc)
   } catch (err) {
     console.error('Error in [POST /api/documents]:', err)
-    // 23505 = unique_violation — should be rare now that titles are disambiguated
     if (err.code === '23505') {
       return res.status(409).json({
         error: 'A document with this title already exists',
@@ -392,32 +315,30 @@ app.post('/api/documents', authenticateToken, async (req, res) => {
 
 app.get('/api/documents/:id', authenticateToken, async (req, res) => {
   const userId = req.user.userId
-  const documentId = Number(req.params.id)
+  const docId = Number(req.params.id)
 
   try {
-    // Check whether the user has an ACL entry for this document.
-    const aclCheck = await pool.query('SELECT role FROM acl WHERE document_id = $1 AND user_id = $2', [documentId, userId])
+    //acl check on this doc before we return the row
+    const aclCheck = await pool.query('SELECT role FROM acl WHERE document_id = $1 AND user_id = $2', [docId, userId])
     if (aclCheck.rows.length === 0) {
       return res.status(403).json({ error: 'Forbidden' })
     }
 
-    // Load the document and owner username.
-    const docResult = await pool.query(
+    const docRes = await pool.query(
       `
       SELECT d.*, owner.username AS owner_username
       FROM documents d
       JOIN users owner ON d.owner_id = owner.id
       WHERE d.id = $1
       `,
-      [documentId]
+      [docId]
     )
 
-    if (docResult.rows.length === 0) {
+    if (docRes.rows.length === 0) {
       return res.status(404).json({ error: 'Document not found' })
     }
 
-    // Load collaborators so the editor can show who else has access.
-    const collaboratorsResult = await pool.query(
+    const collaborators = await pool.query(
       `
       SELECT u.id AS user_id, u.username, a.role
       FROM acl a
@@ -431,13 +352,13 @@ app.get('/api/documents/:id', authenticateToken, async (req, res) => {
         END,
         u.username ASC
       `,
-      [documentId]
+      [docId]
     )
 
     return res.json({
-      ...docResult.rows[0],
+      ...docRes.rows[0],
       your_role: aclCheck.rows[0].role,
-      collaborators: collaboratorsResult.rows
+      collaborators: collaborators.rows
     })
   } catch (err) {
     console.error('[GET /documents/:id] Error:', err)
@@ -447,12 +368,11 @@ app.get('/api/documents/:id', authenticateToken, async (req, res) => {
 
 app.put('/api/documents/:id/content', authenticateToken, async (req, res) => {
   const userId = req.user.userId
-  const documentId = Number(req.params.id)
+  const docId = Number(req.params.id)
   const { content } = req.body || {}
 
   try {
-    // Check role from ACL to enforce editor/owner rule.
-    const aclResult = await pool.query('SELECT role FROM acl WHERE document_id = $1 AND user_id = $2', [documentId, userId])
+    const aclResult = await pool.query('SELECT role FROM acl WHERE document_id = $1 AND user_id = $2', [docId, userId])
     if (aclResult.rows.length === 0) {
       return res.status(403).json({ error: 'Forbidden' })
     }
@@ -463,7 +383,6 @@ app.put('/api/documents/:id/content', authenticateToken, async (req, res) => {
     }
 
     const saved = await withTransaction(async (client) => {
-      // Update the document content and updated_at timestamp.
       const updateResult = await client.query(
         `
         UPDATE documents
@@ -471,45 +390,41 @@ app.put('/api/documents/:id/content', authenticateToken, async (req, res) => {
         WHERE id = $2
         RETURNING updated_at
         `,
-        [String(content ?? ''), documentId]
+        [String(content ?? ''), docId]
       )
 
-      // If the document id doesn’t exist, return 404.
       if (updateResult.rows.length === 0) {
         return { notFound: true }
       }
 
-      // Find the latest revision number so we can create the next one.
       const latestRevision = await client.query(
         'SELECT COALESCE(MAX(version_number), 0) AS max_version FROM revisions WHERE document_id = $1',
-        [documentId]
+        [docId]
       )
       const nextVersionNumber = Number(latestRevision.rows[0].max_version) + 1
 
-      // Insert the new revision row.
       await client.query(
         `
         INSERT INTO revisions (document_id, content, version_number, change_description, created_by, created_at, restore_of)
         VALUES ($1, $2, $3, 'Content saved', $4, NOW(), NULL)
         `,
-        [documentId, String(content ?? ''), nextVersionNumber, userId]
+        [docId, String(content ?? ''), nextVersionNumber, userId]
       )
 
-      const docTitleResult = await client.query('SELECT title FROM documents WHERE id = $1', [documentId])
-      const docTitle = docTitleResult.rows[0]?.title || 'a document'
+      const titleRes = await client.query('SELECT title FROM documents WHERE id = $1', [docId])
+      const docTitle = titleRes.rows[0]?.title || 'a document'
 
       const whoRes = await client.query('SELECT username FROM users WHERE id = $1', [userId])
       const saverName = whoRes.rows[0]?.username || 'Someone'
 
-      // One notification per save for everyone else on the doc (every Save hits this PUT)
-      const collaborators = await client.query('SELECT user_id FROM acl WHERE document_id = $1 AND user_id != $2', [documentId, userId])
-      for (const row of collaborators.rows) {
+      const collabs = await client.query('SELECT user_id FROM acl WHERE document_id = $1 AND user_id != $2', [docId, userId])
+      for (const row of collabs.rows) {
         await client.query(
           `
           INSERT INTO notifications (user_id, type, document_id, actor_id, message, is_read, created_at)
           VALUES ($1, 'document_edited'::notification_type, $2, $3, $4, false, NOW())
           `,
-          [row.user_id, documentId, userId, `"${docTitle}" was modified by ${saverName}`]
+          [row.user_id, docId, userId, `"${docTitle}" was modified by ${saverName}`]
         )
       }
 
@@ -527,14 +442,14 @@ app.put('/api/documents/:id/content', authenticateToken, async (req, res) => {
   }
 })
 
-// Shared handler: change acl.role for one user (owner only). PUT is an alias for picky proxies.
+//same handler for patch and put on collaborator role
 async function handleUpdateCollaboratorRole(req, res) {
   const ownerUserId = req.user.userId
-  const documentId = Number(req.params.id)
+  const docId = Number(req.params.id)
   const targetUserId = Number(req.params.userId)
   const newRole = String((req.body || {}).role || '').toLowerCase()
 
-  if (!Number.isFinite(documentId) || documentId <= 0) {
+  if (!Number.isFinite(docId) || docId <= 0) {
     return res.status(400).json({ error: 'Invalid document id' })
   }
   if (!Number.isFinite(targetUserId) || targetUserId <= 0) {
@@ -546,12 +461,12 @@ async function handleUpdateCollaboratorRole(req, res) {
   }
 
   try {
-    const ownerAcl = await pool.query('SELECT role FROM acl WHERE document_id = $1 AND user_id = $2', [documentId, ownerUserId])
+    const ownerAcl = await pool.query('SELECT role FROM acl WHERE document_id = $1 AND user_id = $2', [docId, ownerUserId])
     if (ownerAcl.rows.length === 0 || ownerAcl.rows[0].role !== 'owner') {
       return res.status(403).json({ error: 'Only the owner can change roles' })
     }
 
-    const docRow = await pool.query('SELECT owner_id FROM documents WHERE id = $1', [documentId])
+    const docRow = await pool.query('SELECT owner_id FROM documents WHERE id = $1', [docId])
     if (docRow.rows.length === 0) {
       return res.status(404).json({ error: 'Document not found' })
     }
@@ -561,7 +476,7 @@ async function handleUpdateCollaboratorRole(req, res) {
 
     const upd = await pool.query(
       `UPDATE acl SET role = $1::role_type WHERE document_id = $2 AND user_id = $3 RETURNING user_id`,
-      [newRole, documentId, targetUserId]
+      [newRole, docId, targetUserId]
     )
     if (upd.rows.length === 0) {
       return res.status(400).json({ error: 'Collaborator not found on this document (check user id)' })
@@ -577,13 +492,13 @@ async function handleUpdateCollaboratorRole(req, res) {
 app.patch('/api/documents/:id/acl/:userId', authenticateToken, handleUpdateCollaboratorRole)
 app.put('/api/documents/:id/acl/:userId', authenticateToken, handleUpdateCollaboratorRole)
 
-// Remove a user from the document ACL — owner only; notifies the removed user
+//owner only delete on acl removes their access
 app.delete('/api/documents/:id/acl/:userId', authenticateToken, async (req, res) => {
   const ownerUserId = req.user.userId
-  const documentId = Number(req.params.id)
+  const docId = Number(req.params.id)
   const targetUserId = Number(req.params.userId)
 
-  if (!Number.isFinite(documentId) || documentId <= 0) {
+  if (!Number.isFinite(docId) || docId <= 0) {
     return res.status(400).json({ error: 'Invalid document id' })
   }
   if (!Number.isFinite(targetUserId) || targetUserId <= 0) {
@@ -591,16 +506,15 @@ app.delete('/api/documents/:id/acl/:userId', authenticateToken, async (req, res)
   }
 
   try {
-    const ownerAcl = await pool.query('SELECT role FROM acl WHERE document_id = $1 AND user_id = $2', [documentId, ownerUserId])
+    const ownerAcl = await pool.query('SELECT role FROM acl WHERE document_id = $1 AND user_id = $2', [docId, ownerUserId])
     if (ownerAcl.rows.length === 0 || ownerAcl.rows[0].role !== 'owner') {
       return res.status(403).json({ error: 'Only the owner can remove users' })
     }
 
-    const docRow = await pool.query('SELECT owner_id, title FROM documents WHERE id = $1', [documentId])
+    const docRow = await pool.query('SELECT owner_id, title FROM documents WHERE id = $1', [docId])
     if (docRow.rows.length === 0) {
       return res.status(404).json({ error: 'Document not found' })
     }
-    // Never strip access from the real owner account
     if (Number(docRow.rows[0].owner_id) === Number(targetUserId)) {
       return res.status(400).json({ error: 'Cannot remove the document owner' })
     }
@@ -608,17 +522,16 @@ app.delete('/api/documents/:id/acl/:userId', authenticateToken, async (req, res)
     const title = docRow.rows[0].title || 'this document'
 
     const removed = await withTransaction(async (client) => {
-      const del = await client.query('DELETE FROM acl WHERE document_id = $1 AND user_id = $2 RETURNING user_id', [documentId, targetUserId])
+      const del = await client.query('DELETE FROM acl WHERE document_id = $1 AND user_id = $2 RETURNING user_id', [docId, targetUserId])
       if (del.rows.length === 0) {
         return false
       }
-      // Let them know why the doc vanished from their list
       await client.query(
         `
         INSERT INTO notifications (user_id, type, document_id, actor_id, message, is_read, created_at)
         VALUES ($1, 'user_removed'::notification_type, $2, $3, $4, false, NOW())
         `,
-        [targetUserId, documentId, ownerUserId, `Your access to "${title}" was removed`]
+        [targetUserId, docId, ownerUserId, `Your access to "${title}" was removed`]
       )
       return true
     })
@@ -636,11 +549,10 @@ app.delete('/api/documents/:id/acl/:userId', authenticateToken, async (req, res)
 
 app.delete('/api/documents/:id', authenticateToken, async (req, res) => {
   const userId = req.user.userId
-  const documentId = Number(req.params.id)
+  const docId = Number(req.params.id)
 
   try {
-    // Only the owner can delete documents.
-    const roleResult = await pool.query('SELECT role FROM acl WHERE document_id = $1 AND user_id = $2', [documentId, userId])
+    const roleResult = await pool.query('SELECT role FROM acl WHERE document_id = $1 AND user_id = $2', [docId, userId])
     if (roleResult.rows.length === 0) {
       return res.status(403).json({ error: 'Forbidden' })
     }
@@ -649,15 +561,14 @@ app.delete('/api/documents/:id', authenticateToken, async (req, res) => {
     }
 
     await withTransaction(async (client) => {
-      const docInfo = await client.query('SELECT title FROM documents WHERE id = $1', [documentId])
+      const docInfo = await client.query('SELECT title FROM documents WHERE id = $1', [docId])
       const deletedTitle = docInfo.rows[0]?.title || 'A document'
       const actorRes = await client.query('SELECT username FROM users WHERE id = $1', [userId])
       const deleterName = actorRes.rows[0]?.username || 'Someone'
 
-      // Keep old notification rows — only break the FK so the document row can go away
-      await client.query('UPDATE notifications SET document_id = NULL WHERE document_id = $1', [documentId])
+      await client.query('UPDATE notifications SET document_id = NULL WHERE document_id = $1', [docId])
 
-      const stillOnAcl = await client.query('SELECT user_id FROM acl WHERE document_id = $1 AND user_id != $2', [documentId, userId])
+      const stillOnAcl = await client.query('SELECT user_id FROM acl WHERE document_id = $1 AND user_id != $2', [docId, userId])
       for (const row of stillOnAcl.rows) {
         await client.query(
           `
@@ -668,9 +579,9 @@ app.delete('/api/documents/:id', authenticateToken, async (req, res) => {
         )
       }
 
-      await client.query('DELETE FROM revisions WHERE document_id = $1', [documentId])
-      await client.query('DELETE FROM acl WHERE document_id = $1', [documentId])
-      await client.query('DELETE FROM documents WHERE id = $1', [documentId])
+      await client.query('DELETE FROM revisions WHERE document_id = $1', [docId])
+      await client.query('DELETE FROM acl WHERE document_id = $1', [docId])
+      await client.query('DELETE FROM documents WHERE id = $1', [docId])
     })
 
     return res.json({ message: 'Document deleted' })
@@ -682,61 +593,53 @@ app.delete('/api/documents/:id', authenticateToken, async (req, res) => {
 
 app.post('/api/documents/:id/share', authenticateToken, async (req, res) => {
   const userId = req.user.userId
-  const documentId = Number(req.params.id)
+  const docId = Number(req.params.id)
   const { username, role } = req.body || {}
 
-  // Require a username to share with.
   if (!username || String(username).trim().length === 0) {
     return res.status(400).json({ error: 'Username is required to share' })
   }
 
-  // Normalize role to our allowed values.
   const normalizedRole = String(role || 'viewer').toLowerCase() === 'editor' ? 'editor' : 'viewer'
 
   try {
-    // Make sure the requester is the owner.
-    const ownerCheck = await pool.query('SELECT role FROM acl WHERE document_id = $1 AND user_id = $2', [documentId, userId])
+    const ownerCheck = await pool.query('SELECT role FROM acl WHERE document_id = $1 AND user_id = $2', [docId, userId])
     if (ownerCheck.rows.length === 0 || ownerCheck.rows[0].role !== 'owner') {
       return res.status(403).json({ error: 'Only the owner can share this document' })
     }
 
-    // Find the target user by username.
     const targetResult = await pool.query('SELECT id FROM users WHERE username = $1', [String(username).trim()])
     if (targetResult.rows.length === 0) {
       return res.status(404).json({ error: 'User not found' })
     }
     const targetUserId = targetResult.rows[0].id
 
-    // Prevent sharing to yourself (not helpful, and avoids duplicate ACL).
     if (Number(targetUserId) === Number(userId)) {
       return res.status(400).json({ error: 'You already have access to this document' })
     }
 
-    // Check whether the target user already has access.
-    const alreadyShared = await pool.query('SELECT id FROM acl WHERE document_id = $1 AND user_id = $2', [documentId, targetUserId])
+    const alreadyShared = await pool.query('SELECT id FROM acl WHERE document_id = $1 AND user_id = $2', [docId, targetUserId])
     if (alreadyShared.rows.length > 0) {
       return res.status(400).json({ error: 'User already has access' })
     }
 
     await withTransaction(async (client) => {
-      // Insert ACL entry for the new collaborator.
       await client.query(
         `
         INSERT INTO acl (document_id, user_id, role, granted_at, granted_by)
         VALUES ($1, $2, $3::role_type, NOW(), $4)
         `,
-        [documentId, targetUserId, normalizedRole, userId]
+        [docId, targetUserId, normalizedRole, userId]
       )
 
-      // Create a notification for the new collaborator.
-      const docTitleResult = await client.query('SELECT title FROM documents WHERE id = $1', [documentId])
-      const docTitle = docTitleResult.rows[0]?.title || 'a document'
+      const docTitleRes = await client.query('SELECT title FROM documents WHERE id = $1', [docId])
+      const docTitle = docTitleRes.rows[0]?.title || 'a document'
       await client.query(
         `
         INSERT INTO notifications (user_id, type, document_id, actor_id, message, is_read, created_at)
         VALUES ($1, 'document_shared'::notification_type, $2, $3, $4, false, NOW())
         `,
-        [targetUserId, documentId, userId, `A document was shared with you: "${docTitle}"`]
+        [targetUserId, docId, userId, `A document was shared with you: "${docTitle}"`]
       )
     })
 
@@ -751,14 +654,12 @@ app.get('/api/users/search', authenticateToken, async (req, res) => {
   const userId = req.user.userId
   const query = String(req.query.q || '').trim()
 
-  // If the search box is empty, return nothing to keep it simple.
   if (!query) {
     return res.json([])
   }
 
   try {
-    // Search by username, excluding the current user.
-    const result = await pool.query(
+    const r = await pool.query(
       `
       SELECT id, username
       FROM users
@@ -769,30 +670,25 @@ app.get('/api/users/search', authenticateToken, async (req, res) => {
       [`%${query}%`, userId]
     )
 
-    return res.json(result.rows)
+    return res.json(r.rows)
   } catch (err) {
     console.error('[GET /users/search] Error:', err)
     return sendDatabaseHelp(res, err, 'Server error while searching users')
   }
 })
 
-// ============================================
-// REVISION ROUTES SECTION
-// ============================================
-
 app.get('/api/documents/:id/revisions', authenticateToken, async (req, res) => {
   const userId = req.user.userId
-  const documentId = Number(req.params.id)
+  const docId = Number(req.params.id)
 
   try {
-    // Ensure the user can access the document.
-    const aclCheck = await pool.query('SELECT id FROM acl WHERE document_id = $1 AND user_id = $2', [documentId, userId])
+    //acl gate then pull revision list from pool
+    const aclCheck = await pool.query('SELECT id FROM acl WHERE document_id = $1 AND user_id = $2', [docId, userId])
     if (aclCheck.rows.length === 0) {
       return res.status(403).json({ error: 'Forbidden' })
     }
 
-    // Load revisions along with the creator’s username.
-    const result = await pool.query(
+    const r = await pool.query(
       `
       SELECT
         r.id,
@@ -809,10 +705,10 @@ app.get('/api/documents/:id/revisions', authenticateToken, async (req, res) => {
       WHERE r.document_id = $1
       ORDER BY r.version_number DESC
       `,
-      [documentId]
+      [docId]
     )
 
-    return res.json(result.rows)
+    return res.json(r.rows)
   } catch (err) {
     console.error('[GET /documents/:id/revisions] Error:', err)
     return sendDatabaseHelp(res, err, 'Server error while loading revisions')
@@ -821,17 +717,15 @@ app.get('/api/documents/:id/revisions', authenticateToken, async (req, res) => {
 
 app.post('/api/documents/:id/restore', authenticateToken, async (req, res) => {
   const userId = req.user.userId
-  const documentId = Number(req.params.id)
+  const docId = Number(req.params.id)
   const { revisionId } = req.body || {}
 
-  // Require the revision id.
   if (!revisionId) {
     return res.status(400).json({ error: 'revisionId is required' })
   }
 
   try {
-    // Enforce owner/editor permissions.
-    const aclResult = await pool.query('SELECT role FROM acl WHERE document_id = $1 AND user_id = $2', [documentId, userId])
+    const aclResult = await pool.query('SELECT role FROM acl WHERE document_id = $1 AND user_id = $2', [docId, userId])
     if (aclResult.rows.length === 0) {
       return res.status(403).json({ error: 'Forbidden' })
     }
@@ -841,34 +735,30 @@ app.post('/api/documents/:id/restore', authenticateToken, async (req, res) => {
     }
 
     const restoreResult = await withTransaction(async (client) => {
-      // Load the revision we want to restore.
-      const revisionResult = await client.query(
+      const revRes = await client.query(
         'SELECT id, content, version_number FROM revisions WHERE id = $1 AND document_id = $2',
-        [revisionId, documentId]
+        [revisionId, docId]
       )
-      if (revisionResult.rows.length === 0) {
+      if (revRes.rows.length === 0) {
         return { notFound: true }
       }
-      const revisionRow = revisionResult.rows[0]
+      const revisionRow = revRes.rows[0]
 
-      // Apply the restored content to the document.
-      await client.query('UPDATE documents SET content = $1, updated_at = NOW() WHERE id = $2', [revisionRow.content, documentId])
+      await client.query('UPDATE documents SET content = $1, updated_at = NOW() WHERE id = $2', [revisionRow.content, docId])
 
-      // Find next version number.
       const latestRevision = await client.query(
         'SELECT COALESCE(MAX(version_number), 0) AS max_version FROM revisions WHERE document_id = $1',
-        [documentId]
+        [docId]
       )
       const nextVersionNumber = Number(latestRevision.rows[0].max_version) + 1
 
-      // Create a new revision that records the restore action.
       await client.query(
         `
         INSERT INTO revisions (document_id, content, version_number, change_description, created_by, created_at, restore_of)
         VALUES ($1, $2, $3, $4, $5, NOW(), $6)
         `,
         [
-          documentId,
+          docId,
           revisionRow.content,
           nextVersionNumber,
           `Restored from version ${revisionRow.version_number}`,
@@ -877,17 +767,16 @@ app.post('/api/documents/:id/restore', authenticateToken, async (req, res) => {
         ]
       )
 
-      // Notify collaborators.
-      const docTitleResult = await client.query('SELECT title FROM documents WHERE id = $1', [documentId])
-      const docTitle = docTitleResult.rows[0]?.title || 'a document'
-      const collaborators = await client.query('SELECT user_id FROM acl WHERE document_id = $1 AND user_id != $2', [documentId, userId])
-      for (const row of collaborators.rows) {
+      const docTitleRes = await client.query('SELECT title FROM documents WHERE id = $1', [docId])
+      const docTitle = docTitleRes.rows[0]?.title || 'a document'
+      const collabs = await client.query('SELECT user_id FROM acl WHERE document_id = $1 AND user_id != $2', [docId, userId])
+      for (const row of collabs.rows) {
         await client.query(
           `
           INSERT INTO notifications (user_id, type, document_id, actor_id, message, is_read, created_at)
           VALUES ($1, 'version_restored'::notification_type, $2, $3, $4, false, NOW())
           `,
-          [row.user_id, documentId, userId, `A collaborator restored a version of "${docTitle}"`]
+          [row.user_id, docId, userId, `A collaborator restored a version of "${docTitle}"`]
         )
       }
 
@@ -905,16 +794,11 @@ app.post('/api/documents/:id/restore', authenticateToken, async (req, res) => {
   }
 })
 
-// ============================================
-// NOTIFICATION ROUTES SECTION
-// ============================================
-
 app.get('/api/notifications', authenticateToken, async (req, res) => {
   const userId = req.user.userId
 
   try {
-    // Return notifications with actor username and document title when possible.
-    const result = await pool.query(
+    const r = await pool.query(
       `
       SELECT
         n.id,
@@ -936,7 +820,7 @@ app.get('/api/notifications', authenticateToken, async (req, res) => {
       [userId]
     )
 
-    return res.json(result.rows)
+    return res.json(r.rows)
   } catch (err) {
     console.error('[GET /notifications] Error:', err)
     return sendDatabaseHelp(res, err, 'Server error while loading notifications')
@@ -947,7 +831,6 @@ app.patch('/api/notifications/read-all', authenticateToken, async (req, res) => 
   const userId = req.user.userId
 
   try {
-    // Mark all notifications as read for this user.
     await pool.query('UPDATE notifications SET is_read = true WHERE user_id = $1', [userId])
     return res.json({ message: 'All marked as read' })
   } catch (err) {
@@ -956,17 +839,17 @@ app.patch('/api/notifications/read-all', authenticateToken, async (req, res) => 
   }
 })
 
-// Mark one notification read — only if it belongs to the logged-in user
+//mark one notification read only if its yours
 app.patch('/api/notifications/:id/read', authenticateToken, async (req, res) => {
   const userId = req.user.userId
   const notifId = Number(req.params.id)
 
   try {
-    const result = await pool.query(
+    const r = await pool.query(
       'UPDATE notifications SET is_read = true WHERE id = $1 AND user_id = $2 RETURNING id',
       [notifId, userId]
     )
-    if (result.rows.length === 0) {
+    if (r.rows.length === 0) {
       return res.status(404).json({ error: 'Notification not found' })
     }
     return res.json({ message: 'Marked as read' })
@@ -976,26 +859,19 @@ app.patch('/api/notifications/:id/read', authenticateToken, async (req, res) => 
   }
 })
 
-// ============================================
-// START SERVER
-// ============================================
-
-// Quick DB connection test on startup
-pool.query('SELECT NOW()', (err, res) => {
+//quick db ping on boot
+pool.query('SELECT NOW()', (err, dbRes) => {
   if (err) {
     console.error('DATABASE CONNECTION FAILED:', err.message)
   } else {
-    console.log('Database connected successfully at:', res.rows[0].now)
+    console.log('Database connected successfully at:', dbRes.rows[0].now)
   }
 })
 
-// Must match frontend `api.js` baseURL (…:PORT/api) so role/remove calls don’t hit the wrong server
 const port = Number(process.env.PORT || 3002)
 app.listen(port, async () => {
-  console.log(`CollabNotes API running on port ${port}`)
-  console.log('ACL: PATCH/PUT /api/documents/:id/acl/:userId   DELETE /api/documents/:id/acl/:userId')
+  console.log('server running on port', port)
 
-  // Try a simple query so we can confirm the DB connection at startup.
   try {
     await pool.query('SELECT 1')
     console.log('Connected to PostgreSQL: CollabNotesClientServer')

@@ -1,134 +1,100 @@
-# CollabNotes — Layered Client-Server Architecture
+# CollabNotes - Selected Architecture
 
-## What This Demonstrates
-This `Selected/` implementation is intentionally **simple** so the architecture is easy to understand.
+this is the layered client-server implementation of CollabNotes.
+Our goal was to keep it simple enough that the architecture is shown just by looking at the file structure.
 
-It shows 4 layers working together:
 
-1. **Presentation Layer** (React pages)
-   - Displays UI, handles clicks/typing, and calls `api.js`.
-2. **Client Connector** (`frontend/src/api.js`)
-   - The only place the frontend is allowed to talk to the backend.
-3. **API Layer** (`backend/server.js`)
-   - Express routes that validate requests, check JWT tokens, and run SQL.
-4. **Data Layer** (PostgreSQL)
-   - Stores users, documents, ACL permissions, revisions, and notifications.
+## how the layers work
 
-Flow: **React UI → api.js → Express (/api/...) → PostgreSQL**
+We have 4 layers and each talks to the one directly below it, the front end never directly touches the database and vice versa
 
-## Setup
-1. Ensure PostgreSQL is running and you have a database named:
-   - `CollabNotesClientServer`
-2. Edit `Selected/backend/.env` and set:
-   - `DB_PASSWORD=your_postgres_password`
-3. Double-click:
-   - `Selected/run.bat`
-4. Open:
-   - Frontend: `http://localhost:5173`
+React pages  →  api.js  →  server.js routes  →  PostgreSQL
+(what you see) (connector)  (api layer)       (data layer)
 
-## Two People Editing (Same Network)
-1. On one machine, run the app and create a user account.
-2. On another machine on the same network, open the frontend in a browser:
-   - Use the first machine’s LAN IP (Vite prints a Network URL if enabled).
-3. Register a second user, create a document, share it to the other user.
-4. Both users can open the document and:
-   - Click **Refresh** to see each other’s edits.
-   - Click **Save** to create revisions and notifications.
+React pages: ui implementations, clicks, and form inputs --> no logic lives here.
 
-## File Guide (Minimal on purpose)
+api.js: the only file the frontend uses to talk to the backend, if a page needs data it calls a function from here, never makes its own fetch calls.
 
-### Backend (API Layer + DB access in one file)
-- `backend/server.js`
-  - Express routes (API Layer)
-  - JWT auth middleware
-  - SQL queries to PostgreSQL (Data Layer)
+server.js: handles all the incoming requests, checks tokens, runs sql queries. This is where permission checks happen and where documents get saved.
 
-### Backend config
-- `backend/.env`
-  - DB connection credentials + JWT secret
+PostgreSQL: stores everything --> users, documents, ACL, every version of every document, and notifications.
 
-### Frontend (Presentation Layer)
-- `frontend/index.html`
-  - Hosts the React app
-- `frontend/src/main.jsx`
-  - Mounts React
-- `frontend/src/App.jsx`
-  - Router only
-- `frontend/src/components/Navbar.jsx`
-  - Top navigation bar shared across pages
-- `frontend/src/pages/*`
-  - Each page is a full UI screen
+## one thing we changed from the original plan
+We originally had real-time editing as a feature for this project, we decided to omit it due to the complexity and it is not needed to show the architecture
+instead we added a refresh button in the editor. When two people have the same document open, clicking Refresh pulls the latest saved version from the
+server. it does the same thing, just not automatic, which also helps show the layered flow easier to see since you can watch the request go out and come back.
 
-### Frontend connector
-- `frontend/src/api.js`
-  - The only file that talks to the backend
+## setup
 
-# CollabNotes — Selected Architecture: Layered Client-Server
+requirements: 
+- PostgreSQL 18
+- Node.js
 
-## Architecture Overview
-This implementation follows a strict Layered Client-Server architecture:
+####step 1 - create the database
+open pgAdmin 4, right-click Databases, create one called exactly:
+`CollabNotesClientServer`
 
-- **Presentation Layer (React)**: renders UI and captures user input.
-- **API Layer (Spring Controllers)**: HTTP entry points; validates request shape and delegates.
-- **Service Layer (Business Logic)**: permission checks, workflows, orchestration across repositories.
-- **Data Access Layer (Repositories)**: the only layer that runs queries against PostgreSQL.
+then open the Query Tool on that database and run the sql in `backend\README.me` (just copy and pate the code provided)
 
-Flow: **React (Presentation)** → **Controllers (API)** → **Services** → **Repositories** → **PostgreSQL**
+####step 2 - set your backend env file
 
-## How to Run
-1. Ensure PostgreSQL is running and you have a database named:
-   - `CollabNotesClientServer`
-2. Update the password in:
-   - `backend/src/main/resources/application.properties`
-3. Run:
-   - Windows: `run.bat`
-   - Mac/Linux: `./run.sh`
-4. Open:
-   - Frontend: `http://localhost:5173`
-   - Backend: `http://localhost:8080`
+open `backend/.env.example` and follow the example when making your .env
 
-## Layer Responsibilities (File Map)
+####step 3 - run it
 
-### Presentation Layer (Client UI)
-Location: `frontend/src/`
+double-click `run.bat` on Windows or run in the terminal 
 
-- **Pages**: `frontend/src/pages/*.jsx`
-- **Components**: `frontend/src/components/*.jsx`
-- **Modals**: `frontend/src/modals/*.jsx`
-- **Contexts**: `frontend/src/contexts/*.jsx`
-- **Client connectors**:
-  - `frontend/src/services/api.js`
-  - `frontend/src/services/socket.js`
+it opens two terminal windows (one for the backend one for the frontend) so wait for both to finish starting up then go to:
 
-### API Layer (Controllers)
-Location: `backend/src/main/java/com/collabnotes/controller/`
+http://localhost:5173
 
-- `AuthController.java`
-- `DocumentController.java`
-- `RevisionController.java`
-- `NotificationController.java`
 
-### Service Layer
-Location: `backend/src/main/java/com/collabnotes/service/`
+## testing with two people
 
-- `AuthService.java`
-- `DocumentService.java`
-- `RevisionService.java`
-- `NotificationService.java`
+you don't need two computers. just open two browser tabs (seperate or incognito for at least one).
 
-### Data Access Layer (Repositories)
-Location: `backend/src/main/java/com/collabnotes/repository/`
+1. register an account in  the first tab  
+2.  register a different account in the second tab
+3. in the first tab create a  documents and share it with the second user
+4. open  the same document in both tabs
+5. type something in one tab and click Save'
+6.  go to the other tab and click Refresh to see the change show up for the other user
 
-- `UserRepository.java`
-- `DocumentRepository.java`
-- `AclRepository.java`
-- `RevisionRepository.java`
-- `NotificationRepository.java`
-- `SessionRepository.java`
+the Refresh button shows the flow by triggerng a GET request through api.js to server.js which queries the documents table and sends back the latest content
 
-### Domain Layer (JPA Entities + Enums)
-Location: `backend/src/main/java/com/collabnotes/domain/`
 
-- Entities: `User`, `Document`, `Acl`, `Revision`, `Notification`, `Session`
-- Enums: `backend/src/main/java/com/collabnotes/domain/enums/*`
+## files and what they do
 
+```
+Selected/
+├── backend /
+│   ├── server.js       - the entire backend, all routes and db queries in one file
+│   └─ .env.example           - database credentials set up, create a .env to work 
+│
+ ──  frontend/
+│   └── src /
+│       ├── api.js           - all http calls to the backend live here
+│       ├──  App.jsx              - the router
+│       ├── components /
+│       │   └── Navbar.jsx       - top nav, shared across all pages
+│       └── pages/
+│           ├── LoginPage.jsx         - login & register
+│           ├──  DashboardPage.jsx     - document list with filters and notifications recent
+│           ├── DocumentsPage.jsx     - simpler list view of documents
+│           ├── EditorPage .jsx        - open & edit a document
+│           ├── VersionHistoryPage.jsx - see & restore older versions
+│           └── NotificationsPage.jsx  - alerts for shares and edits (also notificaiton slot on home page with recent ones)
+│
+ ── run.bat      - starts everything on Windows
+└── README.md       - what you are reading!
+
+
+## database tables
+read the backend\readme for this information 
+
+---
+
+## notes
+- passwords are  bcrypt hashed, never stored as  plain text
+-every protected route checks a  jwt token before doing anything
+-  when deleting a document cascades and cleans up acl, revisions, and notifications automatically

@@ -1,9 +1,6 @@
-// ============================================
-// PRESENTATION LAYER — App (Router only)
-// This file contains routing only. It does not fetch data
-// or perform business logic. Pages call api.js for data.
-// ============================================
-
+// # this is the presentation layer entry point
+// # just handles routing between pages, nothing else
+// # all the real ui logic lives in the individual page files
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import LoginPage from './pages/LoginPage.jsx'
 import DashboardPage from './pages/DashboardPage.jsx'
@@ -13,16 +10,13 @@ import VersionHistoryPage from './pages/VersionHistoryPage.jsx'
 import NotificationsPage from './pages/NotificationsPage.jsx'
 
 function PrivateRoute({ children }) {
-  // Read the token straight from localStorage (simple and explicit).
   const token = localStorage.getItem('cn_token')
   const location = useLocation()
 
-  // If there is no token, force the user back to the login screen.
   if (!token) {
     return <Navigate to="/login" replace state={{ from: location }} />
   }
 
-  // Otherwise, allow the route through.
   return children
 }
 
@@ -33,7 +27,6 @@ export default function App() {
         <Route
           path="/"
           element={
-            // Redirect based on whether the user is logged in.
             localStorage.getItem('cn_token') ? <Navigate to="/dashboard" replace /> : <Navigate to="/login" replace />
           }
         />

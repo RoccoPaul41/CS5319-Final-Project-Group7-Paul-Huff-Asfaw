@@ -1,172 +1,142 @@
-// ============================================
-// PRESENTATION LAYER — Dashboard Page
-// This is the CLIENT side of the Layered Architecture.
-// Responsibility: Show UI and handle user interactions.
-// All data comes from api.js — no direct DB or server calls.
-// ============================================
-
+//presentation layer: main dashboard
+//-->loads documents from the api layer on mount
+// --> user never talks to postgres directly, always through the backend api which enforces permissions
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+
 import Navbar from '../components/Navbar.jsx'
+
 import { createDocument, deleteDocument, getDocuments, getNotifications, searchUsers, shareDocument } from '../api.js'
 
-const COLORS = {
-  primary: '#4F46E5',
-  background: '#F9FAFB',
-  surface: '#FFFFFF',
-  border: '#E5E7EB',
-  text: '#111827',
-  muted: '#6B7280',
-  danger: '#EF4444'
-}
+const COLORS = { primary: '#4F46E5', background: '#F9FAFB',surface: '#FFFFFF',border: '#E5E7EB',text: '#111827',muted: '#6B7280',danger: '#EF4444' }
 
-function timeAgo(iso) {
-  // Convert a timestamp into “X min ago” style text.
+function timeAgo(iso) 
+{
   const minutes = Math.floor((Date.now() - new Date(iso).getTime()) / 60000)
+
   if (Number.isNaN(minutes)) return 'just now'
+
   if (minutes < 60) return `${minutes} min ago`
+  
   if (minutes < 1440) return `${Math.floor(minutes / 60)} hr ago`
   return 'Yesterday'
 }
 
 export default function DashboardPage() {
-  // Read the current user once from localStorage.
-  const currentUser = JSON.parse(localStorage.getItem('cn_user') || 'null')
+  const user = JSON.parse(localStorage.getItem('cn_user') || 'null')
 
-  // Store documents and notifications.
-  const [documents, setDocuments] = useState([])
-  const [notifications, setNotifications] = useState([])
-
-  // Sidebar filter.
-  const [filter, setFilter] = useState('all') // all | mine | shared
-
-  // New document inline form.
+  // store the documents and notifications.
+  const [documents,setDocuments]= useState([])
+  const [notifications , setNotifications] = useState([])
+  const [filter, setFilter] =  useState('all') // all | mine | shared
   const [showCreate, setShowCreate] = useState(false)
-  const [newTitle, setNewTitle] = useState('')
-  const [createError, setCreateError] = useState('')
-
-  // Share form state.
-  const [shareOpenForDocId, setShareOpenForDocId] = useState(null)
-  const [shareQuery, setShareQuery] = useState('')
-  const [shareResults, setShareResults] = useState([])
-  const [shareRole, setShareRole] = useState('viewer')
-  const [shareError, setShareError] = useState('')
-  // Picked from search — API runs only after Confirm share
+  const [newTitle,setNewTitle] = useState('')
+  const [err, setErr] =  useState('')
+  const [shareDocId, setShareDocId] =useState(null)
+  const [share,setShare] = useState('')
+  const [results, setResults] = useState([])
+  const [shareRole , setShareRole] =useState('viewer')
+  const [shareError,setShareError] = useState('')
   const [shareSelectedUser, setShareSelectedUser] = useState(null)
 
   const navigate = useNavigate()
-
-  const loadPageData = async () => {
-    // Load documents and notifications in parallel.
+  const loadPageData = async () => 
+    {
     const [docs, notifs] = await Promise.all([getDocuments(), getNotifications()])
     setDocuments(docs)
     setNotifications(notifs)
   }
 
-  useEffect(() => {
-    // Load the dashboard once when the page opens.
+  useEffect(() => 
+    {
     loadPageData().catch((err) => console.error(err))
   }, [])
 
-  // Compute unread badge count.
-  const unreadCount = useMemo(() => notifications.filter((n) => !n.is_read).length, [notifications])
+  const unreadCount= useMemo(() => notifications.filter((n) => !n.is_read).length, [notifications])
 
-  // Apply the requested filters.
-  const filteredDocs = useMemo(() => {
-    if (filter === 'mine') return documents.filter((d) => Number(d.owner_id) === Number(currentUser?.id))
-    if (filter === 'shared') return documents.filter((d) => Number(d.owner_id) !== Number(currentUser?.id))
+  const shown = useMemo(() => 
+    {
+    if (filter=== 'mine') return documents.filter((d) => Number(d.owner_id) === Number(user?.id))
+    if (filter=== 'shared') return documents.filter((d) => Number(d.owner_id) !== Number(user?.id))
     return documents
-  }, [documents, filter, currentUser])
+  }, [documents, filter, user])
 
-  const handleCreateDocument = async () => {
-    // Clear prior errors.
-    setCreateError('')
+  const handleCreateDocument = async () => 
+    {
+    setErr('')
 
-    // Validate title.
-    if (!newTitle.trim()) {
-      setCreateError('Title is required')
+    if (!newTitle.trim()) 
+      {
+      setErr('Title is required')
       return
     }
 
-    try {
-      // Create the document via the API layer.
-      // Documents always start as private.
-      // Share them from inside the editor once created.
-      await createDocument(newTitle.trim(), 'private')
+    try 
+    {
+      await createDocument(newTitle.trim() , 'private')
 
-      // Reset form.
       setNewTitle('')
       setShowCreate(false)
 
-      // Refresh list.
       await loadPageData()
     } catch (err) {
       const d = err?.response?.data
       const msg = [d?.error, d?.detail].filter(Boolean).join(' — ')
-      setCreateError(msg || 'Could not create document')
+      setErr(msg || 'Could not create document')
     }
   }
 
-  const handleDeleteDocument = async (doc) => {
-    // Confirm deletion with the simplest built-in prompt.
-    const ok = window.confirm(`Delete "${doc.title}"?`)
+  const handleDeleteDocument = async (doc) => 
+    {
+    const ok =window.confirm(`Delete "${doc.title}"?`)
     if (!ok) return
 
     try {
-      // Delete via API layer.
       await deleteDocument(doc.id)
 
-      // Refresh list.
       await loadPageData()
     } catch (err) {
       window.alert(err?.response?.data?.error || 'Could not delete document')
     }
   }
 
-  const openShareForm = (docId) => {
-    // Open share UI for the selected document.
-    setShareOpenForDocId(docId)
-    setShareQuery('')
-    setShareResults([])
+  const openShareForm =(docId) => {
+    setShareDocId(docId)
+    setShare('')
+    setResults([])
     setShareRole('viewer')
     setShareError('')
     setShareSelectedUser(null)
   }
 
-  const handleSearchUsers = async (query) => {
-    // Keep query in sync with the input.
-    setShareQuery(query)
+  const handleSearchUsers =async (query) => {
+    setShare(query)
     setShareSelectedUser(null)
 
-    // Empty query means no dropdown.
-    if (!query.trim()) {
-      setShareResults([])
+    if (!query.trim())
+       {
+      setResults([])
       return
     }
 
     try {
-      // Call API search endpoint.
-      const results = await searchUsers(query.trim())
-      setShareResults(results)
+      const r= await searchUsers(query.trim())
+      setResults(r)
     } catch {
-      // If search fails, just clear results.
-      setShareResults([])
+      setResults([])
     }
   }
 
-  const handleShareDocument = async (docId, targetUsername) => {
-    // Clear prior errors.
+  const handleShareDocument= async (docId, targetUsername) => 
+    {
     setShareError('')
 
     try {
-      // Share via API layer.
       await shareDocument(docId, targetUsername, shareRole)
 
-      // Close the share UI.
-      setShareOpenForDocId(null)
+      setShareDocId(null)
       setShareSelectedUser(null)
 
-      // Refresh list and mini notifications.
       await loadPageData()
     } catch (err) {
       setShareError(err?.response?.data?.error || 'Could not share document')
@@ -234,14 +204,14 @@ export default function DashboardPage() {
               <div>
                 <div style={{ fontSize: 24, fontWeight: 900, color: COLORS.text }}>My Documents</div>
                 <div style={{ fontSize: 13, color: COLORS.muted, marginTop: 4 }}>
-                  {filteredDocs.length} documents · last updated {filteredDocs[0]?.updated_at ? timeAgo(filteredDocs[0].updated_at) : 'n/a'}
+                  {shown.length} documents · last updated {shown[0]?.updated_at ? timeAgo(shown[0].updated_at) : 'n/a'}
                 </div>
               </div>
 
               <button
                 onClick={() => {
                   setShowCreate(true)
-                  setCreateError('')
+                  setErr('')
                 }}
                 style={{ height: 38, borderRadius: 10, border: 'none', background: COLORS.primary, color: 'white', fontWeight: 900, padding: '0 14px', cursor: 'pointer' }}
               >
@@ -262,7 +232,7 @@ export default function DashboardPage() {
                   />
                 </div>
 
-                {createError ? <div style={{ marginTop: 8, color: COLORS.danger, fontSize: 13 }}>{createError}</div> : null}
+                {err ? <div style={{ marginTop: 8, color: COLORS.danger, fontSize: 13 }}>{err}</div> : null}
 
                 <div style={{ marginTop: 12, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                   <button
@@ -283,7 +253,7 @@ export default function DashboardPage() {
 
             {/* Document grid */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 16 }}>
-              {filteredDocs.map((doc) => {
+              {shown.map((doc) => {
                 const role = String(doc.your_role || '').toLowerCase()
                 const isOwner = role === 'owner'
                 const roleLabel = role === 'owner' ? 'Owner' : role === 'editor' ? 'Editor' : 'Viewer'
@@ -317,19 +287,19 @@ export default function DashboardPage() {
                     {/* Share UI (owners only) */}
                     {isOwner ? (
                       <div style={{ marginTop: 10 }}>
-                        {shareOpenForDocId === doc.id ? (
+                        {shareDocId === doc.id ? (
                           <div style={{ borderTop: `1px solid ${COLORS.border}`, paddingTop: 10 }}>
                             <div style={{ fontSize: 13, fontWeight: 900, marginBottom: 6 }}>Share</div>
                             <input
-                              value={shareQuery}
+                              value={share}
                               onChange={(e) => handleSearchUsers(e.target.value)}
                               placeholder="Search username..."
                               style={{ height: 34, borderRadius: 8, border: `1px solid ${COLORS.border}`, padding: '0 10px', width: '100%' }}
                             />
 
-                            {shareResults.length > 0 ? (
+                            {results.length > 0 ? (
                               <div style={{ marginTop: 6, border: `1px solid ${COLORS.border}`, borderRadius: 8, overflow: 'hidden' }}>
-                                {shareResults.map((u) => {
+                                {results.map((u) => {
                                   const picked = shareSelectedUser && Number(shareSelectedUser.id) === Number(u.id)
                                   return (
                                     <button
@@ -392,7 +362,7 @@ export default function DashboardPage() {
                               <button
                                 type="button"
                                 onClick={() => {
-                                  setShareOpenForDocId(null)
+                                  setShareDocId(null)
                                   setShareError('')
                                   setShareSelectedUser(null)
                                 }}

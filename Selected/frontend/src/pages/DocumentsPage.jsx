@@ -1,10 +1,5 @@
-// ============================================
-// PRESENTATION LAYER — Documents Page
-// Simple list view of all accessible documents.
-// Different from Dashboard which has sidebar filters.
-// Calls getDocuments() from api.js on mount.
-// ============================================
-
+// # presentation layer - documents list page
+// # just shows docs you can access and lets you open them
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Navbar from '../components/Navbar.jsx'
@@ -22,25 +17,21 @@ const COLORS = {
 export default function DocumentsPage() {
   const [documents, setDocuments] = useState([])
   const [notifications, setNotifications] = useState([])
-  // Search box text — filters the list we already loaded (no extra API)
   const [search, setSearch] = useState('')
   const navigate = useNavigate()
 
   const load = async () => {
-    // Load documents and notifications so the navbar badge is accurate.
     const [docs, notifs] = await Promise.all([getDocuments(), getNotifications()])
     setDocuments(docs)
     setNotifications(notifs)
   }
 
   useEffect(() => {
-    // Load the page data once when the page opens.
     load().catch((e) => console.error(e))
   }, [])
 
   const unreadCount = useMemo(() => notifications.filter((n) => !n.is_read).length, [notifications])
 
-  // Filter by title as the user types (client-side only)
   const filtered = documents.filter((doc) =>
     String(doc.title || '')
       .toLowerCase()
@@ -48,7 +39,6 @@ export default function DocumentsPage() {
   )
 
   const formatRole = (role) => {
-    // Display nice casing while keeping backend enums lowercase.
     const r = String(role || '').toLowerCase()
     if (r === 'owner') return 'Owner'
     if (r === 'editor') return 'Editor'
@@ -71,7 +61,6 @@ export default function DocumentsPage() {
         </div>
 
         <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 12, overflow: 'hidden' }}>
-          {/* Search documents — same border/focus colors as the rest of the app */}
           <div style={{ padding: 12, borderBottom: `1px solid ${COLORS.border}` }}>
             <input
               value={search}
