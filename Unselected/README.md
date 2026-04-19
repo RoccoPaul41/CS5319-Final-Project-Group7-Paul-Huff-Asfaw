@@ -109,7 +109,7 @@ the layered approach was simpler to reason about and easier to demonstrate the a
 event-driven would be the better choice if the system needed to scale to many users or add new features frequently without touching existing services.
 
 ## file guide
-'''
+```
 Unselected/
 ├── backend/
 │   ├── .env.example                 - env template (db creds, jwt secret, port)
@@ -149,5 +149,5 @@ Unselected/
 │           ├── VersionHistoryPage.jsx - revisions + restore
 │           └── NotificationsPage.jsx  - notification list + mark read
 └── run.bat                          - starts backend then frontend on windows
-
+```
 
