@@ -41,7 +41,7 @@ these happen independently because they are connected through the event bus, not
 ## events in this codebase
 
 these event names come from `backend/events/eventTypes.js`. not every event is fully wired up yet (see known limitations).
-
+```
 EVENT NAME | TRIGGER (producer) | CONSUMERS (subscribers)
 documentCreated | (defined) | DocumentService (logs ack)
 documentSaved | PUT /api/documents/:id/content publishes it | VersioningService, NotificationService, WebSocketGateway, EventTracer
@@ -51,7 +51,7 @@ versionRestored | POST /api/documents/:id/restore publishes it | NotificationSer
 documentRoleUpdated | (defined) | DocumentService + NotificationService (logs + notifs) (not currently published)
 documentAccessRevoked | (defined) | DocumentService + NotificationService (logs + notifs) (not currently published)
 notificationGenerated | (defined) | WebSocketGateway (not currently published)
-
+```
 
 ## setup
 
