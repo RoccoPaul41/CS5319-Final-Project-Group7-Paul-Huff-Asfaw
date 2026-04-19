@@ -1,5 +1,11 @@
 import axios from 'axios'
 
+// # CLIENT CONNECTOR — event-driven version
+// # same interface as Selected/frontend/src/api.js intentionally
+// # the frontend does not know or care which architecture is running
+// # this is a good property — the presentation layer is unchanged
+// # only the backend changed between the two architectures
+
 // this is the only file that talks to the backend
 //all the pages import from here instead of making their own fetch calls - keeps things organized
 // this represents the connector between the presentation layer (the pages) and the api layer (server.js)

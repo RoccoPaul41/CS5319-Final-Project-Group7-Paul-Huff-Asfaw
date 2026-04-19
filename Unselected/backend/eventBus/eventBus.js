@@ -1,4 +1,10 @@
 /**
+ * EVENT BUS — this is the core of the event-driven architecture
+ * services publish events here instead of calling each other
+ * this decouples the services so they can work independently
+ * equivalent role to api.js connector in the layered architecture
+ * but instead of HTTP calls it routes internal events
+ *
  * EventBus — In-memory Publish-Subscribe event bus.
  *
  * Architectural style: Implicit Invocation / Publish-Subscribe

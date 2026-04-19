@@ -1,5 +1,7 @@
 // # presentation layer - documents list page
 // # just shows docs you can access and lets you open them
+// # event-driven note: the pages still use the same api.js functions,
+// # but the backend can push changes out through websockets
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Navbar from '../components/Navbar.jsx'

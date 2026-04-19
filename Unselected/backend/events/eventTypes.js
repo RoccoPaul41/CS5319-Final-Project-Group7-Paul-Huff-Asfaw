@@ -1,4 +1,9 @@
 /**
+ * EVENT DEFINITIONS — these are the contracts between services
+ * each event has a name and a payload of data it carries
+ * producers publish these, consumers listen for them
+ * events are immutable once published
+ *
  * eventTypes.js — Canonical event type constants and factory functions.
  *
  * Architecture note: Events are the sole communication channel between

@@ -1,6 +1,7 @@
 // # this is the presentation layer entry point
 // # just handles routing between pages, nothing else
-// # all the real ui logic lives in the individual page files
+// # event-driven note: the UI stays the same, only the backend changes
+// # pages still call api.js, and the backend publishes events internally
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import LoginPage from './pages/LoginPage.jsx'
 import DashboardPage from './pages/DashboardPage.jsx'

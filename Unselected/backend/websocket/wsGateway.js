@@ -1,4 +1,9 @@
 /**
+ * WEBSOCKET LAYER — pushes events to the browser in real time
+ * in the layered architecture we used a refresh button instead
+ * event-driven makes real-time easier because events naturally
+ * flow out to clients when something changes
+ *
  * WebSocketGateway — Bridges EventBus to connected frontend clients.
  * Subscriber only. Never publishes events.
  */

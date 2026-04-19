@@ -1,7 +1,7 @@
 // # presentation layer - document editor
-// # saves go to the api layer which updates postgres
-// # and creates a revision entry automatically
-// # the refresh button pulls the latest version down
+// # saves go to the api layer, and the backend publishes a DocumentSaved event
+// # versioning + notifications react by consuming that event (no service calls another service directly)
+// # event-driven makes real-time possible through websockets (this UI can still manually refresh too)
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import Navbar from '../components/Navbar.jsx'

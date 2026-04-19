@@ -1,100 +1,153 @@
-# CollabNotes - Selected Architecture
+# CollabNotes - Unselected Architecture
 
-this is the layered client-server implementation of CollabNotes.
-Our goal was to keep it simple enough that the architecture is shown just by looking at the file structure.
+this is the event-driven implementation of CollabNotes.
+the frontend is basically the same as Selected, but the backend is split into services that communicate by publishing and consuming events.
 
 
-## how the layers work
+## architecture overview
 
-We have 4 layers and each talks to the one directly below it, the front end never directly touches the database and vice versa
+in the layered architecture, one user action turns into one synchronous chain (page → api.js → server route → db query → response).
 
-React pages  →  api.js  →  server.js routes  →  PostgreSQL
-(what you see) (connector)  (api layer)       (data layer)
+in this event-driven version, the request still comes into an express route, but instead of one part of the backend directly calling another part,
+the route publishes an event to an event bus. any service that cares about that event can react to it.
+services do not call each other directly.
 
-React pages: ui implementations, clicks, and form inputs --> no logic lives here.
+folder structure (what each piece represents):
+- backend/db/          - postgres connection pool (database access)
+- backend/eventBus/    - the event broker that routes events between services (this is the key difference from Selected)
+- backend/events/      - the event definitions (event names + what data they carry)
+- backend/services/    - independent services that subscribe to events (document, versioning, notifications)
+- backend/websocket/   - websocket gateway that pushes event updates to the browser in real time
+- backend/server.js    - express entry point + rest routes (publishes events)
+- frontend/            - same react pages as Selected, api.js points to this backend
 
-api.js: the only file the frontend uses to talk to the backend, if a page needs data it calls a function from here, never makes its own fetch calls.
+event flow looks like:
 
-server.js: handles all the incoming requests, checks tokens, runs sql queries. This is where permission checks happen and where documents get saved.
+User action → REST route → route publishes event → eventBus routes it → consuming services react → WebSocket pushes update to browser
 
-PostgreSQL: stores everything --> users, documents, ACL, every version of every document, and notifications.
 
-## one thing we changed from the original plan
-We originally had real-time editing as a feature for this project, we decided to omit it due to the complexity and it is not needed to show the architecture
-instead we added a refresh button in the editor. When two people have the same document open, clicking Refresh pulls the latest saved version from the
-server. it does the same thing, just not automatic, which also helps show the layered flow easier to see since you can watch the request go out and come back.
+## key difference from layered architecture
+
+Selected (layered) is more like: route does the work right away and you get one synchronous chain.
+
+Unselected (event-driven) is more like: route publishes something like a DocumentSaved event and then:
+- the versioning service consumes it (updates the document content / updated_at)
+- the notification service consumes it (creates notifications for collaborators)
+- the websocket gateway consumes it (pushes a message to connected users)
+
+these happen independently because they are connected through the event bus, not by services calling each other.
+
+
+## events in this codebase
+
+these event names come from `backend/events/eventTypes.js`. not every event is fully wired up yet (see known limitations).
+
+EVENT NAME | TRIGGER (producer) | CONSUMERS (subscribers)
+documentCreated | (defined) | DocumentService (logs ack)
+documentSaved | PUT /api/documents/:id/content publishes it | VersioningService, NotificationService, WebSocketGateway, EventTracer
+documentShared | POST /api/documents/:id/share publishes it | DocumentService, NotificationService, WebSocketGateway, EventTracer
+documentDeleted | DELETE /api/documents/:id publishes it | DocumentService, NotificationService, WebSocketGateway, EventTracer
+versionRestored | POST /api/documents/:id/restore publishes it | NotificationService, WebSocketGateway, EventTracer
+documentRoleUpdated | (defined) | DocumentService + NotificationService (logs + notifs) (not currently published)
+documentAccessRevoked | (defined) | DocumentService + NotificationService (logs + notifs) (not currently published)
+notificationGenerated | (defined) | WebSocketGateway (not currently published)
+
 
 ## setup
 
-requirements: 
+requirements:
 - PostgreSQL 18
 - Node.js
 
-####step 1 - create the database
-open pgAdmin 4, right-click Databases, create one called exactly:
+step 1 - create the database
+same as Selected. make sure you have a postgres database named exactly:
 `CollabNotesClientServer`
 
-then open the Query Tool on that database and run the sql in `backend\README.me` (just copy and pate the code provided)
+run the SQL from `backend/README.md` to create the tables/enums.
 
-####step 2 - set your backend env file
+step 2 - set your backend env file
+copy `backend/.env.example` to `backend/.env` and fill in your postgres password.
 
-open `backend/.env.example` and follow the example when making your .env
+step 3 - run it
+double click `run.bat`
 
-####step 3 - run it
+Frontend: http://localhost:5173
+Backend:  http://localhost:3002
 
-double-click `run.bat` on Windows or run in the terminal 
-
-it opens two terminal windows (one for the backend one for the frontend) so wait for both to finish starting up then go to:
-
-http://localhost:5173
-
-
-## testing with two people
-
-you don't need two computers. just open two browser tabs (seperate or incognito for at least one).
-
-1. register an account in  the first tab  
-2.  register a different account in the second tab
-3. in the first tab create a  documents and share it with the second user
-4. open  the same document in both tabs
-5. type something in one tab and click Save'
-6.  go to the other tab and click Refresh to see the change show up for the other user
-
-the Refresh button shows the flow by triggerng a GET request through api.js to server.js which queries the documents table and sends back the latest content
-
-## database tables
-read the backend\readme for this information 
-
----
-
-## notes
-- passwords are  bcrypt hashed, never stored as  plain text
--every protected route checks a  jwt token before doing anything
--  when deleting a document cascades and cleans up acl, revisions, and notifications automatically
+note: this uses a different backend port than Selected so you can run both at the same time if needed.
 
 
-## files and what they do
+## what is the same as Selected
+- same postgresql database name and schema (users, sessions, documents, acl, revisions, notifications, and enums)
+- same react pages and general UI
+- same features on paper: auth, documents, sharing, versions, notifications
+- same env structure (db host/port/name/user/password + jwt secret)
 
-```
-Selected/
-├── backend /
-│   ├── server.js       - the entire backend, all routes and db queries in one file
-│   └─ .env.example           - database credentials set up, create a .env to work 
-│
- ──  frontend/
-│   └── src /
-│       ├── api.js           - all http calls to the backend live here
-│       ├──  App.jsx              - the router
-│       ├── components /
-│       │   └── Navbar.jsx       - top nav, shared across all pages
+
+## what is different from Selected
+- backend is split into services instead of one huge file doing everything
+- services communicate through events (event bus) instead of calling each other directly
+- websocket gateway is built in, so events can be pushed out to the browser in real time
+- `backend/eventBus/` and `backend/events/` are new compared to Selected (these define the connector + contracts between services)
+
+
+## known limitations
+
+- not every event in `backend/events/eventTypes.js` is actually published yet.
+  the current backend routes publish: documentSaved, documentShared, documentDeleted, versionRestored.
+- `notificationGenerated` is defined and the websocket gateway listens for it, but the notification service currently inserts rows into the database
+  and does not publish a notificationGenerated event, so notifications are not pushed to the browser through that path.
+- the backend share route expects `{ userId, role }`, but the frontend `frontend/src/api.js` currently sends `{ username, role }`.
+  if you try sharing from the UI it will fail until that payload matches.
+
+
+## architecture note
+
+this implementation represents the Unselected architecture option for our cs5319 project.
+we chose the layered client-server (Selected) over this because for our project scope — small groups, simple collaboration, emphasis on consistency —
+the layered approach was simpler to reason about and easier to demonstrate the architecture clearly.
+event-driven would be the better choice if the system needed to scale to many users or add new features frequently without touching existing services.
+
+## file guide
+'''
+Unselected/
+├── backend/
+│   ├── .env.example                 - env template (db creds, jwt secret, port)
+│   ├── README.md                    - database schema SQL (same schema as Selected)
+│   ├── package.json                 - backend dependencies (express, pg, ws, etc)
+│   ├─ ─ package-lock.json            - dependency lockfile
+│   ├── server.js                    - API entry point + routes; publishes events to the eventBus
+│   ├── db/
+│   │   └── pool.js                  - postgres connection pool
+│   ├── eventBus/
+│      ├── eventBus.js              - in-memory pub/sub event bus (services subscribe here)
+│   │   └── eventTracer.js           - debug tool that subscribes to all events and logs them
+│   ├── events/
+│   │   └── eventTypes.js            - canonical event names and helper payload creators
+│   ├── services/
+│   │   ├── documentService.js       - event consumer (acks/logs doc lifecycle events)
+     │   ├── versioningService.js     - consumes documentSaved, updates document content/updated_at
+│   │   └── notificationService.js   - consumes events, inserts notification rows in postgres
+│   └── websocket/
+│       └── wsGateway.js             - subscribes to events and pushes them to connected clients
+├── frontend/
+│   ├── index.html                   - html shell that mounts react
+│   ├── package.json                 - frontend dependencies (react, axios, router)
+│   ── package-lock.json            - dependency lockfile
+│   ├── vite.config.js               - dev proxy to backend port 3002 (so /api works in dev)
+│   └── src/
+│       ├── api.js                   - client connector (same interface as Selected)
+│       ├── App.jsx                  - router + auth gate (PrivateRoute)
+│       ├── main.jsx                 - react mount point
+│       ├── components/
+│       │   └── Navbar.jsx           - top nav + logout
 │       └── pages/
-│           ├── LoginPage.jsx         - login & register
-│           ├──  DashboardPage.jsx     - document list with filters and notifications recent
-│           ├── DocumentsPage.jsx     - simpler list view of documents
-│           ├── EditorPage .jsx        - open & edit a document
-│           ├── VersionHistoryPage.jsx - see & restore older versions
-│           └── NotificationsPage.jsx  - alerts for shares and edits (also notificaiton slot on home page with recent ones)
-│
- ── run.bat      - starts everything on Windows
-└── README.md       - what you are reading!
-```
+│           ├── LoginPage.jsx         - login/register
+           ├── DashboardPage.jsx     - doc list + create/share/delete
+│           ├── DocumentsPage.jsx     - list view of docs
+│           ├── EditorPage.jsx        - edit + save
+│           ├── VersionHistoryPage.jsx - revisions + restore
+│           └── NotificationsPage.jsx  - notification list + mark read
+└── run.bat                          - starts backend then frontend on windows
+
+

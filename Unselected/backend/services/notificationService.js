@@ -1,4 +1,10 @@
 /**
+ * SERVICE: NotificationService
+ * PUBLISHES: (none currently) (a natural next step would be notificationGenerated after insert)
+ * CONSUMES: documentSaved, documentShared, documentDeleted, versionRestored, documentRoleUpdated, documentAccessRevoked
+ * in event-driven arch services only know about events,
+ * not about other services directly
+ *
  * NotificationService — Event consumer for generating notifications.
  * Subscriber only. Never calls other services directly.
  */

@@ -1,6 +1,7 @@
 //presentation layer: main dashboard
 //-->loads documents from the api layer on mount
-// --> user never talks to postgres directly, always through the backend api which enforces permissions
+// --> event-driven note: backend routes publish events (save/share/delete/etc)
+// --> services react through the eventBus, not by calling each other directly
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 

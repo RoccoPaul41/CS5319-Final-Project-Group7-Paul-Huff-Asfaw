@@ -2,6 +2,7 @@
 // # this is as far as you get without authenticating
 // # once login works the backend sends back a jwt token
 // # we store that token and use it for every request after
+// # event-driven note: auth is still request/response, events are mainly for document actions + notifications
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { loginUser, registerUser } from '../api.js'

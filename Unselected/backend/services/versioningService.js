@@ -1,4 +1,10 @@
 /**
+ * SERVICE: VersioningService
+ * PUBLISHES: (none)
+ * CONSUMES: documentSaved
+ * in event-driven arch services only know about events,
+ * not about other services directly
+ *
  * VersioningService — Event consumer for persisting document content from DOCUMENT_SAVED.
  * Subscriber only. Never calls other services directly.
  */

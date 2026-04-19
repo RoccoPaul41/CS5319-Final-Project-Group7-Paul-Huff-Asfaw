@@ -1,4 +1,5 @@
 // shared nav component used across all pages, reads the username from localstorage, logout just clears the token and sends you back to login
+// event-driven note: nav does not change between architectures, it only depends on localstorage + routing
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 
 const COLORS = {primary: '#4F46E5',surface: '#FFFFFF', border: '#E5E7EB',text: '#111827',muted: '#6B7280', danger: '#EF4444'}

@@ -1,3 +1,9 @@
+// # API ENTRY POINT — event-driven architecture
+// # routes incoming HTTP requests to the appropriate service
+// # services then publish events rather than calling other services
+// # compare to Selected/backend/server.js which handles everything
+// # in one place — here the logic is distributed across services
+
 const express = require('express')
 const bcrypt = require('bcrypt')
 const jwt = require('jsonwebtoken')

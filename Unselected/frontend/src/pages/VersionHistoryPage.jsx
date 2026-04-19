@@ -2,6 +2,7 @@
 // # every save creates a row in the revisions table
 // # restoring just copies old content into a new revision
 // # the actual restore logic lives in the api layer
+// # event-driven note: saves/restores publish events and services react independently (versioning, notifications, websocket push)
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import Navbar from '../components/Navbar.jsx'

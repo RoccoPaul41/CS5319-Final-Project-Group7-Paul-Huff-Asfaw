@@ -1,4 +1,10 @@
 /**
+ * SERVICE: DocumentService
+ * PUBLISHES: (none)
+ * CONSUMES: documentCreated, documentShared, documentDeleted, documentRoleUpdated, documentAccessRevoked
+ * in event-driven arch services only know about events,
+ * not about other services directly
+ *
  * DocumentService — Event consumer for document lifecycle (acknowledgments).
  * Subscriber only. Never calls other services directly.
  */

@@ -1,5 +1,7 @@
 // presentation layer: notifications
 //the backend creates notification rows whenever something happens (share, edit, restore)
+// event-driven note: notification creation is a reaction to events (DocumentSaved, DocumentShared, VersionRestored, etc)
+// and the websocket gateway can push those event results out to clients in real time
 
 import { useEffect, useMemo, useState } from 'react'
 
